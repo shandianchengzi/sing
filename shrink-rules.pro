@@ -6,3 +6,8 @@
 }
 -dontwarn java.lang.invoke.StringConcatFactory
 -keepattributes *Annotation*
+
+-keep public class com.shandian.sing.UpdateApkProvider {
+    public <init>();
+    public *;
+}

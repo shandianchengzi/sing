@@ -16,6 +16,7 @@ import java.nio.charset.*;
 import java.util.regex.*;
 
 public class MainActivity extends Activity {
+  AppUpdater updater;
   LinearLayout root;
   TextView status, song, previous, current, next, clock;
   Button record, preview, listen, export;
@@ -72,6 +73,9 @@ public class MainActivity extends Activity {
   public void onCreate(Bundle state) {
     super.onCreate(state);
     preferences = getSharedPreferences("session", MODE_PRIVATE);
+    updater =
+        new AppUpdater(
+            this, () -> !recording && !starting && !previewSeeking && !separating && !exporting);
     getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
     root = new LinearLayout(this);
     root.setOrientation(1);
@@ -190,26 +194,7 @@ public class MainActivity extends Activity {
     listen = button("回听最近录音", () -> playTake());
     export = button("导出最近录音", () -> exportOptions());
     button("已保存的录音", () -> chooseTake());
-    button(
-        "下载更新（保留数据）",
-        () -> {
-          if (recording) {
-            message("请先停止录音");
-            return;
-          }
-          new AlertDialog.Builder(this)
-              .setTitle("覆盖安装更新")
-              .setMessage("下载新版 APK 后直接安装，不要卸载或清除数据。固定签名更新会保留录音和设置。若系统提示签名冲突，请先导出录音并联系开发者，不要直接卸载。")
-              .setPositiveButton(
-                  "下载",
-                  (d, w) ->
-                      startActivity(
-                          new Intent(
-                              Intent.ACTION_VIEW,
-                              Uri.parse("https://github.com/shandianchengzi/sing#readme"))))
-              .setNegativeButton("取消", null)
-              .show();
-        });
+    button("检查更新（应用内下载）", () -> updater.check());
     status = text("戴耳机录制；从伴奏当前位置开始，可同步回听和导出混音。", 13);
     take = latest();
     controls();
@@ -294,6 +279,10 @@ public class MainActivity extends Activity {
   @Override
   public void onActivityResult(int code, int result, Intent data) {
     super.onActivityResult(code, result, data);
+    if (code == AppUpdater.INSTALL_PERMISSION) {
+      updater.permissionReturned();
+      return;
+    }
     if (result != RESULT_OK || data == null || data.getData() == null) return;
     Uri uri = data.getData();
     try {
@@ -983,6 +972,7 @@ public class MainActivity extends Activity {
 
   @Override
   protected void onDestroy() {
+    if (updater != null) updater.close();
     if (exportThread != null) exportThread.interrupt();
     if (exportProgress != null) exportProgress.dismiss();
     if (separationTask != null) separationTask.cancel();

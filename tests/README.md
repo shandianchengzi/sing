@@ -13,3 +13,9 @@ Platform MediaRecorder / MediaPlayer / MediaCodec paths require an Android devic
 7. Cover-install a fixed-signature APK and confirm recordings, settings and sidecars remain.
 
 JVM tests do not prove device decoder compatibility, recording latency or synchronization accuracy. Built-in players are synchronized after seeking, but this is not sample-accurate studio synchronization; wired headphones are recommended.
+
+## In-app updater
+
+UpdateTest checks upgrade/equal/downgrade comparisons, rejects non-HTTPS/wrong-repo/mismatched-version or hash URLs, malformed checksums and unreasonable sizes. release_metadata.py reads the actual APK package/version and SHA-256; publication must upload its version/hash-named APK before update.json.
+
+Device checks still required: current-version check; older-version download with visible progress; cancellation; a corrupted APK/hash/signature rejection; denial and granting of per-source installation permission; installer cancellation and retry from the cached package; successful cover-install retaining recordings and settings. The provider must allow only read access to /update.apk through a temporary URI grant.

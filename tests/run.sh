@@ -10,3 +10,5 @@ SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
 API="$SDK/platforms/android-35/android.jar"
 javac -encoding UTF-8 -cp "$API" -d build/tests app/src/main/java/com/shandian/sing/Timeline.java app/src/main/java/com/shandian/sing/WaveFile.java app/src/main/java/com/shandian/sing/PcmAudio.java tests/AudioTest.java
 java -cp "build/tests:$API" com.shandian.sing.AudioTest
+javac -encoding UTF-8 -d build/tests app/src/main/java/com/shandian/sing/UpdateInfo.java tests/UpdateTest.java
+java -cp build/tests com.shandian.sing.UpdateTest

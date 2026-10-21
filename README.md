@@ -1,6 +1,6 @@
 # 轻唱 Sing
 
-原生 Android 轻量录歌工具，Java + 系统 API，无第三方运行库、无 FFmpeg、无 WebView。安装包约 41 KB（实际大小见构建日志）。Android 8.0 及以上。
+原生 Android 轻量录歌工具，Java + 系统 API，无第三方运行库、无 FFmpeg、无 WebView。安装包约 45 KB（实际大小见构建日志）。Android 8.0 及以上。
 
 [下载最新测试版 APK](https://github.com/shandianchengzi/sing/releases/download/preview/sing.apk) · [仓库内 APK](https://github.com/shandianchengzi/sing/raw/refs/heads/main/apk/sing.apk) · [自动构建](https://github.com/shandianchengzi/sing/actions)
 
@@ -17,6 +17,16 @@
 录音源文件仍是独立麦克风人声轨，导出时可选择与伴奏混音，也没有耳返、修音、降噪或评分。外放时麦克风会收进伴奏，建议有线耳机；蓝牙和设备录音启动可能产生延迟，此版本不做采样级同步。每次录音都会保存对应伴奏 URI 和起点，回听/导出时按此对齐；请不要删除或移动原伴奏。切到后台/锁屏/失去音频焦点会结束录音并保存，不做后台录制。
 
 录音保存在应用私有目录，卸载会删除，请及时导出。默认操作都在本地；主动联网获取歌词时访问网易云，主动上传去人声时只把所选文件发给你配置的服务器。
+
+## 应用内更新（v1.6）
+
+点击“检查更新（应用内下载）”可比较已安装版本与发布版本，确认后直接在应用中下载 APK，显示下载进度，校验完成后点“安装”。首次可能需要在系统设置允许轻唱安装此来源的应用，返回后继续安装。无需浏览器另存安装包；覆盖安装保留录音、设置和缓存，不要卸载旧版。
+
+更新请求仅访问本仓库的 HTTPS Release；下载后核对 SHA-256、文件大小、包名、版本号及当前安装的签名。取消或下载失败会清理临时文件，已校验完成的包可复用。录音/导出等操作进行中不发起安装。退出应用会取消未完成的更新下载。
+
+发布流程根据实际签名 APK 生成 `update.json`；下载文件名同时包含版本号和完整 SHA-256。先上传 APK，再发布更新信息，避免发布时客户端下载到不匹配的文件。不需要新增 GitHub Secrets。
+
+这次先手动覆盖安装含更新入口的新版，此后的版本即可通过应用内按钮拉取。最终安装仍由系统提示并需要你确认。
 
 ## 自部署去人声（v1.3）
 
@@ -51,7 +61,7 @@ ANDROID_HOME=/path/to/android-sdk bash build.sh
 5. CI 使用 `SING_KEYSTORE_BASE64`、`SING_KEYSTORE_PASSWORD`（当前密钥密码 android，alias androiddebugkey），每次版本号自动增加。CI 私钥仅写入临时目录，完成后删除。
 6. 本地构建设置 `SIGNING_KEYSTORE=/private/path/sing-fixed.jks`，`SIGNING_PASSWORD=android`；或把备份恢复到被 git 忽略的 `build/development.jks`。不要更换密钥。CI 的 versionCode 为 1000 加运行序号；本地构建更新已安装 CI 包时需设置更大的 `VERSION_CODE`。
 
-这里实现的是小体积完整 APK 的**覆盖升级**，数据保留由 Android 的同包名、同签名安装机制提供。没有引入二进制增量补丁引擎；约几十 KB 的 APK，额外补丁组件会得不偿失。“下载更新”按钮打开新版 APK 下载页面，由系统安装器确认安装。应用自身不请求安装其他应用的权限。
+这里实现的是小体积完整 APK 的**覆盖升级**，数据保留由 Android 的同包名、同签名安装机制提供。没有引入二进制增量补丁引擎；约几十 KB 的 APK，额外补丁组件会得不偿失。“下载更新”按钮打开新版 APK 下载页面，由系统安装器确认安装。应用仅在你选择安装更新时引导授予安装来源权限，并由系统安装器确认安装。
 
 如果曾安装其他来源的随机签名 CI 包，不能直接覆盖，需要先导出录音再迁移，不能通过更换签名绕过系统校验。
 
