@@ -167,8 +167,8 @@ public class MainActivity extends Activity {
         button(
             "试听伴奏 / 暂停",
             () -> {
-              if (!ready || recording || starting || previewSeeking || exporting || separating)
-                return;
+              if ((!ready && replay == null)
+                  || recording || starting || previewSeeking || exporting || separating) return;
               if (replay != null) {
                 replayPosition(
                     at ->
@@ -238,7 +238,10 @@ public class MainActivity extends Activity {
   }
 
   void replayPosition(java.util.function.IntConsumer action) {
-    int at = replay != null && replay.ready ? replay.position() : player.getCurrentPosition();
+    int at =
+        replay != null && replay.ready
+            ? replay.position()
+            : ready ? player.getCurrentPosition() : 0;
     String source = replayInfo == null ? loadedSource : replayInfo.source;
     stopVoice();
     if (!source.isEmpty() && (!ready || !source.equals(loadedSource))) {
@@ -281,8 +284,9 @@ public class MainActivity extends Activity {
   void controls() {
     boolean busy = recording || starting || previewSeeking || separating || exporting;
     record.setText(recording ? "停止并保存录音" : "从当前位置开始录音");
-    record.setEnabled(ready && !starting && !previewSeeking && !separating && !exporting);
-    preview.setEnabled(ready && !busy);
+    record.setEnabled(
+        ready && replay == null && !starting && !previewSeeking && !separating && !exporting);
+    preview.setEnabled((ready || replay != null) && !busy);
     seek.setEnabled((ready || (replay != null && replay.ready)) && !busy);
     listen.setEnabled(!busy && take != null);
     listen.setText(
@@ -678,7 +682,7 @@ public class MainActivity extends Activity {
   }
 
   void begin() {
-    if (!ready || starting || previewSeeking || separating || exporting) return;
+    if (!ready || replay != null || starting || previewSeeking || separating || exporting) return;
     if (checkSelfPermission(Manifest.permission.RECORD_AUDIO)
         != PackageManager.PERMISSION_GRANTED) {
       requestPermissions(new String[] {Manifest.permission.RECORD_AUDIO}, 9);
