@@ -103,7 +103,6 @@ public class MainActivity extends Activity {
     text("导入伴奏 · 看词录音", 14);
     song = text("尚未选择伴奏", 15);
     button("选择伴奏（含 OGG / MP4）", () -> pick(1, "*/*"));
-    button("本地曲库", () -> showLibrary());
     LinearLayout row = new LinearLayout(this);
     root.addView(row);
     Button local = new Button(this);
@@ -114,6 +113,7 @@ public class MainActivity extends Activity {
     online.setText("联网获取歌词");
     row.addView(online, new LinearLayout.LayoutParams(0, -2, 1));
     online.setOnClickListener(v -> lyricsDialog());
+    button("本地曲库", () -> showLibrary());
     TextView lrcHelp = text("LRC 可用电脑软件 163MusicLyrics 获取，导出后传到手机导入。点此查看软件。", 13);
     lrcHelp.setTextColor(0xff176448);
     lrcHelp.setOnClickListener(
@@ -292,7 +292,12 @@ public class MainActivity extends Activity {
     if (source.isEmpty()) return;
     org.json.JSONArray list = library(), updated = new org.json.JSONArray();
     try {
-      updated.put(new org.json.JSONObject().put("uri", source).put("title", title));
+      org.json.JSONObject selected = libraryItem(source);
+      if (selected == null)
+        selected =
+            new org.json.JSONObject().put("uri", source).put("title", title).put("filename", title);
+      if (!selected.has("filename")) selected.put("filename", title);
+      updated.put(selected);
       for (int i = 0; i < list.length(); i++) {
         org.json.JSONObject item = list.optJSONObject(i);
         if (item != null && !source.equals(item.optString("uri"))) updated.put(item);
@@ -300,6 +305,64 @@ public class MainActivity extends Activity {
       preferences.edit().putString("library", updated.toString()).apply();
     } catch (org.json.JSONException ignored) {
     }
+  }
+
+  org.json.JSONObject libraryItem(String source) {
+    org.json.JSONArray items = library();
+    for (int i = 0; i < items.length(); i++) {
+      org.json.JSONObject item = items.optJSONObject(i);
+      if (item != null && source.equals(item.optString("uri"))) return item;
+    }
+    return null;
+  }
+
+  void libraryField(String source, String field, String value) {
+    org.json.JSONArray items = library();
+    for (int i = 0; i < items.length(); i++) {
+      org.json.JSONObject item = items.optJSONObject(i);
+      if (item != null && source.equals(item.optString("uri"))) {
+        try {
+          item.put(field, value);
+        } catch (org.json.JSONException ignored) {
+        }
+        preferences.edit().putString("library", items.toString()).apply();
+        return;
+      }
+    }
+  }
+
+  void renameEntry(String source, String title, Runnable refresh) {
+    EditText input = new EditText(this);
+    input.setSingleLine(true);
+    input.setText(title);
+    input.setSelectAllOnFocus(true);
+    AlertDialog dialog =
+        new AlertDialog.Builder(this)
+            .setTitle("改名（仅修改显示名称）")
+            .setView(input)
+            .setNegativeButton("取消", null)
+            .setPositiveButton("保存", null)
+            .create();
+    dialog.setOnShowListener(
+        d ->
+            dialog
+                .getButton(-1)
+                .setOnClickListener(
+                    v -> {
+                      String changed = input.getText().toString().trim();
+                      if (changed.isEmpty()) {
+                        input.setError("名称不能为空");
+                        return;
+                      }
+                      org.json.JSONObject previous = libraryItem(source);
+                      if (previous != null && !previous.has("filename"))
+                        libraryField(source, "filename", title);
+                      libraryField(source, "title", changed);
+                      if (source.equals(loadedSource)) song.setText(changed);
+                      dialog.dismiss();
+                      refresh.run();
+                    }));
+    dialog.show();
   }
 
   void showLibrary() {
@@ -312,7 +375,6 @@ public class MainActivity extends Activity {
         content,
         "添加伴奏",
         () -> {
-          returnHome();
           pick(1, "*/*");
         });
     EditText search = new EditText(this);
@@ -346,9 +408,25 @@ public class MainActivity extends Activity {
       String source = item.optString("uri"), title = item.optString("title", "伴奏");
       if (source.isEmpty() || !title.toLowerCase(java.util.Locale.ROOT).contains(filter)) continue;
       shown++;
+      LinearLayout entryRow = new LinearLayout(this);
+      entryRow.setOrientation(LinearLayout.HORIZONTAL);
+      parent.addView(entryRow);
       Button entry = new Button(this);
       entry.setText(title);
-      parent.addView(entry);
+      entryRow.addView(entry, new LinearLayout.LayoutParams(0, -2, 1));
+      Button lyrics = new Button(this);
+      lyrics.setText(item.optString("lrc").isEmpty() ? "LRC" : "LRC ✓");
+      entryRow.addView(lyrics);
+      lyrics.setOnClickListener(
+          v -> {
+            preferences.edit().putString("pending_lrc_source", source).apply();
+            pick(5, "*/*");
+          });
+      Button rename = new Button(this);
+      rename.setText("改名");
+      entryRow.addView(rename);
+      rename.setOnClickListener(
+          v -> renameEntry(source, title, () -> renderLibrary(parent, query)));
       entry.setOnClickListener(
           v -> {
             returnHome();
@@ -375,6 +453,8 @@ public class MainActivity extends Activity {
                         if (row != null && !source.equals(row.optString("uri"))) kept.put(row);
                       }
                       preferences.edit().putString("library", kept.toString()).apply();
+                      if (source.equals(preferences.getString("audio", "")))
+                        preferences.edit().remove("audio").apply();
                       renderLibrary(parent, query);
                     })
                 .show();
@@ -516,7 +596,10 @@ public class MainActivity extends Activity {
       updater.permissionReturned();
       return;
     }
-    if (result != RESULT_OK || data == null || data.getData() == null) return;
+    if (result != RESULT_OK || data == null || data.getData() == null) {
+      if (code == 5) preferences.edit().remove("pending_lrc_source").apply();
+      return;
+    }
     Uri uri = data.getData();
     try {
       if (code == 1) {
@@ -529,7 +612,7 @@ public class MainActivity extends Activity {
         }
         preferences.edit().putString("audio", originalAudio).apply();
         importAudio(uri, name(uri));
-      } else if (code == 2) {
+      } else if (code == 2 || code == 5) {
         requestVersion++;
         byte[] bytes;
         try (InputStream in = getContentResolver().openInputStream(uri);
@@ -558,7 +641,16 @@ public class MainActivity extends Activity {
             s = new String(bytes, "GB18030");
           }
         }
-        setLrc(s);
+        if (code == 5) {
+          String target = preferences.getString("pending_lrc_source", "");
+          preferences.edit().remove("pending_lrc_source").apply();
+          if (new Lrc(s).lines.isEmpty()) throw new IOException("请选择带时间戳的标准 LRC");
+          if (libraryItem(target) == null) throw new IOException("该曲库条目已不存在");
+          libraryField(target, "lrc", s);
+          if (target.equals(loadedSource)) setLrc(s);
+          if (secondaryPage != null) showLibrary();
+          Toast.makeText(this, "已配套 LRC", Toast.LENGTH_SHORT).show();
+        } else setLrc(s);
       } else if (code == 4) {
         returnHome();
         startSeparation(uri, name(uri));
@@ -715,6 +807,11 @@ public class MainActivity extends Activity {
 
   void importAudio(Uri uri, String title) {
     loadedSource = uri.toString();
+    requestVersion++;
+    org.json.JSONObject savedItem = libraryItem(loadedSource);
+    String paired = savedItem == null ? "" : savedItem.optString("lrc");
+    lrc = new Lrc(paired);
+    preferences.edit().putString("lrc", paired).apply();
     stopVoice();
     releasePlayer();
     final int version = ++importVersion;
@@ -723,7 +820,9 @@ public class MainActivity extends Activity {
     boolean mp4 =
         "video/mp4".equals(mime)
             || "application/mp4".equals(mime)
-            || title.toLowerCase(java.util.Locale.ROOT).endsWith(".mp4");
+            || (savedItem == null ? title : savedItem.optString("filename", title))
+                .toLowerCase(java.util.Locale.ROOT)
+                .endsWith(".mp4");
     message(mp4 ? "正在提取 MP4 音轨…" : "正在打开伴奏…");
     if (mp4) {
       new Thread(
@@ -758,6 +857,10 @@ public class MainActivity extends Activity {
     }
     shift.setText(preferences.getString("shift", "0"));
     originalAudio = preferences.getString("audio", "");
+    if (!preferences.getBoolean("paired_lrc", false)) {
+      if (!saved.isEmpty()) libraryField(originalAudio, "lrc", saved);
+      preferences.edit().putBoolean("paired_lrc", true).apply();
+    }
     if (!originalAudio.isEmpty())
       try {
         Uri uri = Uri.parse(originalAudio);
@@ -784,7 +887,9 @@ public class MainActivity extends Activity {
             rememberAudio(source, title.replace(" · 仅音频", ""));
             p.setVolume(backingGain, backingGain);
             seek.setMax(p.getDuration());
-            song.setText(title);
+            org.json.JSONObject item = libraryItem(source);
+            song.setText(item == null ? title : item.optString("title", title));
+            if (secondaryPage != null) showLibrary();
             message("伴奏已就绪");
             controls();
             Runnable action = afterAudioReady;
@@ -819,6 +924,7 @@ public class MainActivity extends Activity {
     }
     lrc = parsed;
     preferences.edit().putString("lrc", s).apply();
+    if (!loadedSource.isEmpty()) libraryField(loadedSource, "lrc", s);
     message("已载入 " + lrc.lines.size() + " 行歌词；正数偏移让歌词延后。");
   }
 
