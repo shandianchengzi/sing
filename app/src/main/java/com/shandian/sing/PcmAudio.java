@@ -41,13 +41,14 @@ final class PcmAudio {
       codec.start();
       boolean inputEnd = false, outputEnd = false;
       int encoding = AudioFormat.ENCODING_PCM_16BIT;
+      byte[] block = new byte[65536];
       MediaCodec.BufferInfo info = new MediaCodec.BufferInfo();
       long deadline = System.nanoTime() + 30_000_000_000L;
       while (!outputEnd) {
         if (Thread.currentThread().isInterrupted()) throw new InterruptedIOException("已取消导出");
         if (System.nanoTime() > deadline) throw new IOException("音频解码超时");
         if (!inputEnd) {
-          int index = codec.dequeueInputBuffer(10000);
+          int index = codec.dequeueInputBuffer(0);
           if (index >= 0) {
             ByteBuffer buffer = codec.getInputBuffer(index);
             buffer.clear();
@@ -61,7 +62,7 @@ final class PcmAudio {
             }
           }
         }
-        int index = codec.dequeueOutputBuffer(info, 10000);
+        int index = codec.dequeueOutputBuffer(info, 1000);
         if (index == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
           MediaFormat format = codec.getOutputFormat();
           int rate = format.getInteger(MediaFormat.KEY_SAMPLE_RATE);
@@ -107,17 +108,31 @@ final class PcmAudio {
                                 ((startUs + lengthUs - info.presentationTimeUs) * pcm.rate + 999999)
                                     / 1000000));
               buffer.position(info.offset + first * pcm.channels * bytesPerSample);
-              for (int frame = first; frame < last; frame++) {
-                for (int channel = 0; channel < pcm.channels; channel++) {
-                  int sample =
-                      encoding == AudioFormat.ENCODING_PCM_FLOAT
-                          ? Math.max(-32768, Math.min(32767, Math.round(buffer.getFloat() * 32767)))
-                          : buffer.getShort();
-                  output.write(sample & 255);
-                  output.write((sample >> 8) & 255);
+              if (encoding == AudioFormat.ENCODING_PCM_16BIT) {
+                int remaining = Math.max(0, last - first) * pcm.channels * 2;
+                while (remaining > 0) {
+                  int size = Math.min(remaining, block.length);
+                  buffer.get(block, 0, size);
+                  output.write(block, 0, size);
+                  remaining -= size;
                 }
-                pcm.frames++;
+              } else {
+                int used = 0;
+                for (int frame = first; frame < last; frame++) {
+                  for (int channel = 0; channel < pcm.channels; channel++) {
+                    int sample =
+                        Math.max(-32768, Math.min(32767, Math.round(buffer.getFloat() * 32767)));
+                    block[used++] = (byte) sample;
+                    block[used++] = (byte) (sample >> 8);
+                    if (used == block.length) {
+                      output.write(block, 0, used);
+                      used = 0;
+                    }
+                  }
+                }
+                if (used > 0) output.write(block, 0, used);
               }
+              pcm.frames += Math.max(0, last - first);
               if (lengthUs >= 0
                   && info.presentationTimeUs + count * 1000000L / pcm.rate >= startUs + lengthUs)
                 outputEnd = true;
