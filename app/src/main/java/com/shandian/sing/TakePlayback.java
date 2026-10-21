@@ -48,7 +48,7 @@ final class TakePlayback implements AutoCloseable {
 
   TakePlayback(Context context, File file, TakeInfo info, float v, float b, Listener listener) {
     this(
-        () -> TakeAudio.prepare(context.getApplicationContext(), file, info, true),
+        () -> TakeAudio.preparePlayback(context.getApplicationContext(), file, info),
         info.startMs,
         AndroidSink::new,
         new Handler(Looper.getMainLooper())::post,
