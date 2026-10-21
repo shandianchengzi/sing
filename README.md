@@ -33,10 +33,21 @@ ANDROID_HOME=/path/to/android-sdk bash build.sh
 
 产物 `build/sing.apk`。直接使用 SDK 工具，省去 Gradle 和依赖下载。推送 main 自动构建，并更新 `preview` 测试版 Release。
 
-开发签名私钥不提交仓库。构建时自动生成本地测试密钥；不同 CI 运行之间签名不同，需要卸载旧版再安装（先导出录音）。正式分发应在私有环境通过 `SIGNING_KEYSTORE`、`SIGNING_PASSWORD`、`SIGNING_ALIAS` 使用固定私钥。请勿把私钥提交仓库。
+### 固定签名和保留数据的升级
+
+1. 下载新版 APK 后直接覆盖安装，**不要卸载、不要清除应用数据**。包名保持 `com.shandian.sing`，录音仍在原私有目录。歌词、歌词偏移和已授权的伴奏 URI 会自动保存，下次打开恢复；伴奏被移动/删除时需重选。
+2. v1.0、v1.1 的仓库内 APK 和本次 v1.2 使用同一签名。`signing/certificate.sha256` 固定了公钥证书指纹。构建后会核对签名，错误签名不能通过构建。
+3. 不再自动生成密钥。私钥缺失会终止构建。私钥只在你的私密备份和 Actions Secrets 中保存，**不得上传到公共仓库**。
+4. 首次配置：从私密签名备份解压出 `sing-fixed.jks` 和 `configure-signing.ps1`，在 Windows PowerShell 中运行脚本。需要 GitHub CLI（`winget install --id GitHub.cli`），脚本会引导登录，保存仓库 Actions Secrets 并触发构建。脚本不打印密钥内容。
+5. CI 使用 `SING_KEYSTORE_BASE64`、`SING_KEYSTORE_PASSWORD`（当前密钥密码 android，alias androiddebugkey），每次版本号自动增加。CI 私钥仅写入临时目录，完成后删除。
+6. 本地构建设置 `SIGNING_KEYSTORE=/private/path/sing-fixed.jks`，`SIGNING_PASSWORD=android`；或把备份恢复到被 git 忽略的 `build/development.jks`。不要更换密钥。CI 的 versionCode 为 1000 加运行序号；本地构建更新已安装 CI 包时需设置更大的 `VERSION_CODE`。
+
+这里实现的是小体积完整 APK 的**覆盖升级**，数据保留由 Android 的同包名、同签名安装机制提供。没有引入二进制增量补丁引擎；约几十 KB 的 APK，额外补丁组件会得不偿失。“下载更新”按钮打开新版 APK 下载页面，由系统安装器确认安装。应用自身不请求安装其他应用的权限。
+
+如果曾安装其他来源的随机签名 CI 包，不能直接覆盖，需要先导出录音再迁移，不能通过更换签名绕过系统校验。
 
 ## 验证范围
 
-已执行 Java 编译、DEX 转换、APK 打包和签名校验，以及 LRC 多时间戳、排序、小数精度、offset 和查询边界测试。尚未进行真机麦克风/耳机录音验证，联网接口也需要在实际网络中确认。
+已执行 Java 编译、DEX 转换、APK 打包和签名校验，以及 LRC 多时间戳、排序、小数精度、offset 和查询边界测试。已核对更新前后 APK 的包名、签名与递增版本号；尚未进行真机覆盖升级及麦克风/耳机录音验证，联网接口也需要在实际网络中确认。
 
 Apache-2.0，第三方归属见 NOTICE。

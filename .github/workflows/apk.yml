@@ -21,7 +21,29 @@ jobs:
       - uses: android-actions/setup-android@v3
       - run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
       - run: bash tests/run.sh
-      - run: bash build.sh
+      - name: Restore fixed signing key
+        env:
+          KEYSTORE_BASE64: ${{ secrets.SING_KEYSTORE_BASE64 }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo 'Configure SING_KEYSTORE_BASE64 in repository Actions Secrets. No replacement key will be generated.' >&2
+            exit 1
+          fi
+          mkdir -p build
+          umask 077
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > build/fixed.jks
+      - name: Build compatible update
+        env:
+          SIGNING_KEYSTORE: build/fixed.jks
+          SIGNING_PASSWORD: ${{ secrets.SING_KEYSTORE_PASSWORD || 'android' }}
+          VERSION_CODE: ${{ github.run_number }}
+          VERSION_NAME: 1.2.${{ github.run_number }}
+        run: |
+          export VERSION_CODE=$((VERSION_CODE + 1000))
+          bash build.sh
+      - name: Remove signing key
+        if: always()
+        run: rm -f build/fixed.jks
       - uses: actions/upload-artifact@v4
         with:
           name: sing-apk
@@ -30,5 +52,5 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release view preview >/dev/null 2>&1 || gh release create preview --prerelease --title '轻唱 · 最新测试版' --notes '原生轻量 Android APK；人声单独保存。自动构建，真机兼容性请实测。使用仓库开发签名。'
+          gh release view preview >/dev/null 2>&1 || gh release create preview --prerelease --title '轻唱 · 最新测试版' --notes '原生轻量 Android APK；人声单独保存。自动构建，真机兼容性请实测。沿用固定签名，可覆盖安装保留数据。'
           gh release upload preview build/sing.apk --clobber
