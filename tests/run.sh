@@ -4,6 +4,8 @@ cd "$(dirname "$0")/.."
 mkdir -p build/tests
 javac -encoding UTF-8 -d build/tests app/src/main/java/com/shandian/sing/Lrc.java tests/LrcTest.java
 java -cp build/tests com.shandian.sing.LrcTest
+javac -encoding UTF-8 -d build/tests app/src/main/java/com/shandian/sing/LibraryNames.java tests/LibraryNamesTest.java
+java -cp build/tests com.shandian.sing.LibraryNamesTest
 
 SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
 : "${SDK:?Set ANDROID_HOME for audio tests}"
@@ -15,7 +17,3 @@ java -cp build/tests com.shandian.sing.UpdateTest
 
 javac -encoding UTF-8 -cp "build/tests:$API" -d build/tests app/src/main/java/com/shandian/sing/TakeInfo.java app/src/main/java/com/shandian/sing/TakeAudio.java app/src/main/java/com/shandian/sing/TakePlayback.java app/src/main/java/com/shandian/sing/TakeExport.java tests/PlaybackTest.java
 java -cp "build/tests:$API" com.shandian.sing.PlaybackTest
-
-javac -encoding UTF-8 -cp "build/tests:$API" -d build/tests app/src/main/java/com/shandian/sing/CloudNames.java app/src/main/java/com/shandian/sing/BaiduDrive.java tests/CloudTest.java
-java -cp "build/tests:$API" com.shandian.sing.CloudTest
-python tests/private_config_test.py

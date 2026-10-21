@@ -17,11 +17,14 @@ import java.util.regex.*;
 
 public class MainActivity extends Activity {
   AppUpdater updater;
-  BaiduLibrary cloud;
+  Uri libraryFolder, pendingPairAudio;
+  String pendingPairName;
+  boolean importingPair;
+  int folderScanId, folderOpenId;
+  java.util.ArrayList<FolderLibrary.Item> folderItems = new java.util.ArrayList<>();
   LinearLayout root;
   FrameLayout pages;
   View homePage, secondaryPage;
-  boolean libraryPage;
   TextView status, song, previous, current, next, clock;
   Button record, preview, listen, export;
   SeekBar seek;
@@ -80,7 +83,8 @@ public class MainActivity extends Activity {
   public void onCreate(Bundle state) {
     super.onCreate(state);
     preferences = getSharedPreferences("session", MODE_PRIVATE);
-    cloud = new BaiduLibrary(this);
+    String path = preferences.getString("library_folder", "");
+    if (!path.isEmpty()) libraryFolder = Uri.parse(path);
     updater =
         new AppUpdater(
             this, () -> !recording && !starting && !previewSeeking && !separating && !exporting);
@@ -212,7 +216,7 @@ public class MainActivity extends Activity {
   }
 
   boolean canNavigate() {
-    if (recording || starting || previewSeeking || separating || exporting) {
+    if (recording || starting || previewSeeking || separating || exporting || importingPair) {
       message("请先完成当前录音或处理");
       return false;
     }
@@ -221,7 +225,6 @@ public class MainActivity extends Activity {
 
   LinearLayout subpage(String title) {
     returnHome();
-    libraryPage = false;
     ScrollView scroll = new ScrollView(this);
     scroll.setFillViewport(true);
     LinearLayout content = new LinearLayout(this);
@@ -254,7 +257,6 @@ public class MainActivity extends Activity {
   }
 
   void returnHome() {
-    if (cloud != null) cloud.cancel();
     if (secondaryPage != null) {
       ((android.view.inputmethod.InputMethodManager) getSystemService(INPUT_METHOD_SERVICE))
           .hideSoftInputFromWindow(secondaryPage.getWindowToken(), 0);
@@ -281,7 +283,6 @@ public class MainActivity extends Activity {
           else pick(4, "*/*");
         });
     pageButton(content, "去人声服务设置", () -> separationSettings());
-    pageButton(content, "百度网盘登录与曲库", () -> cloud.show());
     pageButton(content, "关于", () -> showAbout());
   }
 
@@ -424,11 +425,24 @@ public class MainActivity extends Activity {
   void showLibrary() {
     if (!canNavigate()) return;
     LinearLayout content = subpage("本地曲库");
-    libraryPage = true;
-    pageButton(content, "百度网盘曲库", () -> cloud.show());
     TextView help = new TextView(this);
-    help.setText("选过的伴奏会自动加入，按最近使用排序。长按可移出列表，原文件不会删除。");
+    help.setText("选择一个本地文件夹作为曲库，自动识别音频及配套 LRC。也可继续使用历史曲库。");
     content.addView(help);
+    TextView chosen = new TextView(this);
+    chosen.setText(libraryFolder == null ? "尚未选择曲库文件夹" : "曲库：" + directoryName());
+    content.addView(chosen);
+    pageButton(content, "选择／更换曲库文件夹", () -> chooseFolder());
+    CheckBox checkbox = new CheckBox(this);
+    checkbox.setText("添加伴奏＋LRC 后自动移动到曲库文件夹");
+    checkbox.setChecked(preferences.getBoolean("move_pair", true));
+    checkbox.setOnCheckedChangeListener((button, checked) ->
+        preferences.edit().putBoolean("move_pair", checked).apply());
+    content.addView(checkbox);
+    pageButton(content, "添加伴奏＋LRC", () -> {
+      if (libraryFolder == null && preferences.getBoolean("move_pair", true))
+        message("请先选择曲库文件夹，或取消勾选自动移动");
+      else pick(7, "*/*");
+    });
     pageButton(
         content,
         "添加伴奏",
@@ -453,11 +467,97 @@ public class MainActivity extends Activity {
           public void afterTextChanged(android.text.Editable text) {}
         });
     renderLibrary(list, "");
+    scanLibraryFolder(list, search);
+  }
+
+  String directoryName() {
+    try { return android.provider.DocumentsContract.getTreeDocumentId(libraryFolder); }
+    catch (Exception e) { return libraryFolder.toString(); }
+  }
+
+  void chooseFolder() {
+    if (!canNavigate()) return;
+    Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
+    intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+        | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+    startActivityForResult(intent, 6);
+  }
+
+  void scanLibraryFolder(LinearLayout list, EditText search) {
+    final int id = ++folderScanId;
+    folderItems.clear();
+    if (libraryFolder == null) return;
+    final Uri folder = libraryFolder;
+    new Thread(() -> {
+      java.util.ArrayList<FolderLibrary.Item> scanned = null;
+      Exception failure = null;
+      try { scanned = FolderLibrary.scan(getApplicationContext(), folder); }
+      catch (Exception e) { failure = e; }
+      final java.util.ArrayList<FolderLibrary.Item> result = scanned;
+      final Exception error = failure;
+      handler.post(() -> {
+        if (isDestroyed() || folderScanId != id || secondaryPage == null) return;
+        if (error == null) folderItems = result;
+        else message("读取曲库文件夹失败，请重新授权：" + error.getMessage());
+        renderLibrary(list, search.getText().toString());
+      });
+    }, "folder-scan").start();
+  }
+
+  FolderLibrary.Item folderItem(String source) {
+    for (FolderLibrary.Item item : folderItems) if (source.equals(item.audio.toString())) return item;
+    return null;
+  }
+
+  org.json.JSONArray allLibrary() {
+    org.json.JSONArray both = library();
+    java.util.HashSet<String> known = new java.util.HashSet<>();
+    for (int i = 0; i < both.length(); i++) {
+      org.json.JSONObject row = both.optJSONObject(i);
+      if (row != null) known.add(row.optString("uri"));
+    }
+    for (FolderLibrary.Item item : folderItems) {
+      if (!known.add(item.audio.toString())) continue;
+      try {
+        both.put(new org.json.JSONObject().put("uri", item.audio.toString())
+            .put("title", item.name).put("filename", item.name));
+      } catch (org.json.JSONException ignored) {}
+    }
+    return both;
+  }
+
+  void selectLibraryAudio(String source, String title, FolderLibrary.Item file) {
+    final int version = ++folderOpenId;
+    if (file == null || file.lyrics == null) {
+      originalAudio = source;
+      preferences.edit().putString("audio", source).apply();
+      returnHome();
+      importAudio(Uri.parse(source), title);
+      return;
+    }
+    message("正在读取匹配的 LRC…");
+    new Thread(() -> {
+      try {
+        String text = FolderLibrary.readLrc(getApplicationContext(), file.lyrics);
+        if (new Lrc(text).lines.isEmpty()) throw new IOException("LRC 缺少时间戳");
+        handler.post(() -> {
+          if (isDestroyed() || version != folderOpenId) return;
+          rememberAudio(source, title);
+          libraryField(source, "lrc", text);
+          originalAudio = source;
+          preferences.edit().putString("audio", source).apply();
+          returnHome();
+          importAudio(Uri.parse(source), title);
+        });
+      } catch (Exception e) {
+        handler.post(() -> { if (!isDestroyed() && version == folderOpenId) error(e); });
+      }
+    }, "folder-lyrics").start();
   }
 
   void renderLibrary(LinearLayout parent, String query) {
     parent.removeAllViews();
-    org.json.JSONArray entries = library();
+    org.json.JSONArray entries = allLibrary();
     String filter = query.toLowerCase(java.util.Locale.ROOT);
     int shown = 0;
     for (int i = 0; i < entries.length(); i++) {
@@ -466,6 +566,7 @@ public class MainActivity extends Activity {
       String source = item.optString("uri"), title = item.optString("title", "伴奏");
       if (source.isEmpty() || !title.toLowerCase(java.util.Locale.ROOT).contains(filter)) continue;
       shown++;
+      FolderLibrary.Item file = folderItem(source);
       LinearLayout entryRow = new LinearLayout(this);
       entryRow.setOrientation(LinearLayout.HORIZONTAL);
       parent.addView(entryRow);
@@ -473,31 +574,26 @@ public class MainActivity extends Activity {
       entry.setText(title);
       entryRow.addView(entry, new LinearLayout.LayoutParams(0, -2, 1));
       Button lyrics = new Button(this);
-      lyrics.setText(item.optString("lrc").isEmpty() ? "LRC" : "LRC ✓");
+      lyrics.setText(item.optString("lrc").isEmpty() && (file == null || file.lyrics == null) ? "LRC" : "LRC ✓");
       entryRow.addView(lyrics);
       lyrics.setOnClickListener(
           v -> {
-            preferences.edit().putString("pending_lrc_source", source).apply();
+            if (libraryItem(source) == null) rememberAudio(source, title);
+             preferences.edit().putString("pending_lrc_source", source).apply();
             pick(5, "*/*");
           });
       Button rename = new Button(this);
       rename.setText("改名");
       entryRow.addView(rename);
       rename.setOnClickListener(
-          v -> renameEntry(source, title, () -> renderLibrary(parent, query)));
-      entry.setOnClickListener(
           v -> {
-            returnHome();
-            try {
-              originalAudio = source;
-              preferences.edit().putString("audio", source).apply();
-              importAudio(Uri.parse(source), title);
-            } catch (Exception error) {
-              message("无法打开伴奏，请重新选择原文件：" + error.getMessage());
-            }
+            if (libraryItem(source) == null) rememberAudio(source, title);
+            renameEntry(source, title, () -> renderLibrary(parent, query));
           });
+      entry.setOnClickListener(v -> selectLibraryAudio(source, title, file));
       entry.setOnLongClickListener(
           v -> {
+            if (file != null) { message("目录曲库中的文件请使用系统文件管理器移出"); return true; }
             new AlertDialog.Builder(this)
                 .setTitle("从曲库移除？")
                 .setMessage(title + "\n只移除记录，不删除原文件。")
@@ -628,7 +724,7 @@ public class MainActivity extends Activity {
     }
     Intent intent =
         new Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType(type);
-    if (code == 1 || code == 4)
+    if (code == 1 || code == 4 || code == 7)
       intent.putExtra(
           Intent.EXTRA_MIME_TYPES,
           new String[] {
@@ -656,14 +752,28 @@ public class MainActivity extends Activity {
     }
     if (result != RESULT_OK || data == null || data.getData() == null) {
       if (code == 5) preferences.edit().remove("pending_lrc_source").apply();
+      if (code == 7 || code == 8) { pendingPairAudio = null; pendingPairName = null; }
       return;
     }
     Uri uri = data.getData();
     try {
-      if (code == 1) {
+      if (code == 6) {
+        int flags = data.getFlags() & (Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+        getContentResolver().takePersistableUriPermission(uri, flags);
+        libraryFolder = uri;
+        preferences.edit().putString("library_folder", uri.toString()).apply();
+        showLibrary();
+      } else if (code == 7) {
+        saveGrant(uri, data.getFlags());
+        pendingPairAudio = uri;
+        pendingPairName = name(uri);
+        pick(8, "*/*");
+      } else if (code == 8) {
+        saveGrant(uri, data.getFlags());
+        addPair(uri, name(uri));
+      } else if (code == 1) {
         try {
-          getContentResolver()
-              .takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+          saveGrant(uri, data.getFlags());
           originalAudio = uri.toString();
         } catch (SecurityException e) {
           originalAudio = "";
@@ -718,6 +828,55 @@ public class MainActivity extends Activity {
     } catch (Exception e) {
       error(e);
     }
+  }
+
+  void saveGrant(Uri uri, int flags) {
+    int bits = flags & (Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+    if (bits == 0) return;
+    try { getContentResolver().takePersistableUriPermission(uri, bits); }
+    catch (SecurityException ignored) {}
+  }
+
+  void addPair(Uri lrcUri, String lrcName) {
+    if (pendingPairAudio == null || importingPair) return;
+    final Uri input = pendingPairAudio, folder = libraryFolder;
+    final String filename = pendingPairName;
+    final boolean move = preferences.getBoolean("move_pair", true);
+    pendingPairAudio = null; pendingPairName = null;
+    if (move && folder == null) { message("请先选择曲库文件夹"); return; }
+    importingPair = true;
+    message(move ? "正在复制伴奏和 LRC…" : "正在关联伴奏和 LRC…");
+    new Thread(() -> {
+      Uri resultAudio = input;
+      String lyrics = null, warning = "";
+      Exception failure = null;
+      try {
+        lyrics = FolderLibrary.readLrc(getApplicationContext(), lrcUri);
+        if (new Lrc(lyrics).lines.isEmpty()) throw new IOException("LRC 没有有效时间戳");
+        if (move) {
+          FolderLibrary.Imported moved = FolderLibrary.importPair(
+              getApplicationContext(), folder, input, filename, lrcUri, lrcName);
+          resultAudio = moved.audio;
+          warning = moved.warning;
+        }
+      } catch (Exception e) { failure = e; }
+      final Uri loaded = resultAudio;
+      final String text = lyrics, note = warning;
+      final Exception error = failure;
+      handler.post(() -> {
+        if (isDestroyed()) return;
+        importingPair = false;
+        if (error != null) { message("添加失败，原文件保留：" + error.getMessage()); return; }
+        String source = loaded.toString();
+        rememberAudio(source, filename);
+        libraryField(source, "lrc", text);
+        originalAudio = source;
+        preferences.edit().putString("audio", source).apply();
+        importAudio(loaded, filename);
+        message(note.isEmpty() ? "已加入伴奏及 LRC" : "已加入；" + note);
+        if (secondaryPage != null) showLibrary();
+      });
+    }, "pair-import").start();
   }
 
   void separationSettings() {
@@ -947,7 +1106,7 @@ public class MainActivity extends Activity {
             seek.setMax(p.getDuration());
             org.json.JSONObject item = libraryItem(source);
             song.setText(item == null ? title : item.optString("title", title));
-            if (secondaryPage != null && libraryPage) showLibrary();
+            if (secondaryPage != null) showLibrary();
             message("伴奏已就绪");
             controls();
             Runnable action = afterAudioReady;
@@ -1408,8 +1567,8 @@ public class MainActivity extends Activity {
 
   @Override
   protected void onDestroy() {
-    if (cloud != null) cloud.cancel();
     if (updater != null) updater.close();
+    ++folderScanId; ++folderOpenId;
     if (exportThread != null) exportThread.interrupt();
     if (exportProgress != null) exportProgress.dismiss();
     if (separationTask != null) separationTask.cancel();

@@ -14,11 +14,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Require private repository for personal credentials
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          test "$(gh api "repos/$GITHUB_REPOSITORY" --jq .private)" = true || { echo 'Personal builds require a private repository.'; exit 1; }
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -49,14 +44,10 @@ jobs:
           printf '%s' "$KEYSTORE_BASE64" | base64 --decode > build/fixed.jks
       - name: Build compatible update
         env:
-          PRIVATE_BUILD: '1'
-          PRIVATE_REPO_CONFIRMED: '1'
-          APPKEY: ${{ secrets.APPKEY }}
-          SECRETKEY: ${{ secrets.SECRETKEY }}
           SIGNING_KEYSTORE: build/fixed.jks
           SIGNING_PASSWORD: ${{ secrets.SING_KEYSTORE_PASSWORD || 'android' }}
           VERSION_CODE: ${{ github.run_number }}
-          VERSION_NAME: 1.8.${{ github.run_number }}
+          VERSION_NAME: 1.9.${{ github.run_number }}
         run: |
           export VERSION_CODE=$((VERSION_CODE + 1000))
           bash build.sh
@@ -67,10 +58,6 @@ jobs:
         run: python scripts/release_metadata.py build/sing.apk
       - name: Package self-hosted server
         run: zip -j build/sing-server.zip server/app.py server/requirements.txt server/Dockerfile server/compose.yaml server/README.md server/test_api.py server/smoke_test.py LICENSE NOTICE licenses/Apache-2.0.txt
-      - name: Verify artifacts remain private
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: test "$(gh api "repos/$GITHUB_REPOSITORY" --jq .private)" = true
       - uses: actions/upload-artifact@v4
         with:
           name: sing-apk
@@ -83,9 +70,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          test "$(gh api "repos/$GITHUB_REPOSITORY" --jq .private)" = true
           gh release view preview >/dev/null 2>&1 || gh release create preview --prerelease --title '轻唱 · 最新测试版' --notes '原生轻量 Android APK；人声单独保存。自动构建，真机兼容性请实测。沿用固定签名，可覆盖安装保留数据。'
           gh release upload preview build/sing.apk build/sing-[0-9]*.apk build/sing-server.zip --clobber
           # Publish metadata last; existing manifests keep pointing to immutable versioned APKs.
           gh release upload preview build/update.json --clobber
-          gh release edit preview --title '轻唱 · 最新测试版' --notes '个人私用版：百度网盘登录、指定目录曲库、伴奏与 LRC 自动匹配及离线缓存。安装包含个人应用凭据，只供本人使用，不对外分发。固定签名覆盖安装保留数据；私有仓库更新需浏览器登录 GitHub 下载。实际百度账号授权、网盘权限与真机播放需安装后验证。'
+          gh release edit preview --title '轻唱 · 最新测试版' --notes '移除百度网盘，支持本地文件夹曲库、自动匹配 LRC、成对添加并可选移动文件（默认开启）。固定签名覆盖安装保留数据。'
