@@ -159,9 +159,11 @@ final class TakePlayback implements AutoCloseable {
           pendingFrame = -1;
         }
         if (target >= 0) {
-          Sink old = sink;
-          sink = null;
-          if (old != null) old.close();
+          synchronized (lock) {
+            Sink old = sink;
+            sink = null;
+            if (old != null) old.close();
+          }
           if (v != null) v.close();
           if (b != null) b.close();
           baseFrame = frame = target;
@@ -214,9 +216,11 @@ final class TakePlayback implements AutoCloseable {
             if (!closed) listener.failed(error);
           });
     } finally {
-      Sink output = sink;
-      sink = null;
-      if (output != null) output.close();
+      synchronized (lock) {
+        Sink output = sink;
+        sink = null;
+        if (output != null) output.close();
+      }
       try {
         if (v != null) v.close();
         if (b != null) b.close();
