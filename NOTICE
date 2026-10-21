@@ -1,0 +1,5 @@
+LyricsApi.java adapts the NetEase lyric retrieval and AES/RSA request flow from:
+163MusicLyrics — https://github.com/jitwxs/163MusicLyrics
+Copyright jitwxs and contributors, licensed under Apache License 2.0.
+Original: cross-platform/MusicLyricApp/Core/Service/Music/NetEaseMusicNativeApi.cs
+Original project and trademark ownership remain with their respective holders.
