@@ -1,6 +1,6 @@
 # 轻唱 Sing
 
-原生 Android 轻量录歌工具，Java + 系统 API，无第三方运行库、无 FFmpeg、无 WebView。安装包约 29 KB（实际大小见构建日志）。Android 8.0 及以上。
+原生 Android 轻量录歌工具，Java + 系统 API，无第三方运行库、无 FFmpeg、无 WebView。安装包约 37 KB（实际大小见构建日志）。Android 8.0 及以上。
 
 [下载最新测试版 APK](https://github.com/shandianchengzi/sing/releases/download/preview/sing.apk) · [仓库内 APK](https://github.com/shandianchengzi/sing/raw/refs/heads/main/apk/sing.apk) · [自动构建](https://github.com/shandianchengzi/sing/actions)
 
@@ -15,7 +15,13 @@
 
 录制的是麦克风人声轨，**不会把伴奏数字混入录音**，也没有耳返、修音、降噪或评分。外放时麦克风会收进伴奏，建议有线耳机；蓝牙和设备录音启动可能产生延迟，此版本不做采样级同步。开始录音会从伴奏开头重录。切到后台/锁屏/失去音频焦点会结束录音并保存，不做后台录制。
 
-录音保存在应用私有目录，卸载会删除，请及时导出。无上传服务器，联网仅用于用户主动获取歌词。
+录音保存在应用私有目录，卸载会删除，请及时导出。默认操作都在本地；主动联网获取歌词时访问网易云，主动上传去人声时只把所选文件发给你配置的服务器。
+
+## 自部署去人声（v1.3）
+
+无需第三方付费 API。电脑上运行本仓库的 Demucs 服务，手机填地址和令牌，直接上传原曲（也支持 MP4），自动下载伴奏并用于录歌。APK 不包含模型，仍然只有几十 KB。相同文件生成的伴奏会缓存到手机，下次无需重新上传。
+
+[查看部署说明](server/README.md) · [下载自部署服务包](https://github.com/shandianchengzi/sing/releases/download/preview/sing-server.zip)。最方便的方式是安装 Docker，在 `server/.env` 设置自己的 `SING_TOKEN`，然后在 server 目录运行 `docker compose up -d --build`。手机“去人声服务设置”填 `http://电脑局域网IP:8765` 和相同令牌，测试连接后使用“上传歌曲去人声”。自部署依然需要自己的硬件、电费和初次下载模型；服务按本文档部署即可兼容，无需修改模型工具的桌面界面。
 
 ## 歌词来源
 

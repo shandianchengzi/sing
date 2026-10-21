@@ -1,0 +1,16 @@
+services:
+  separation:
+    build: .
+    ports:
+      - "8765:8765"
+    environment:
+      SING_TOKEN: ${SING_TOKEN:?Set SING_TOKEN in .env first}
+      SING_MAX_MB: 100
+      SING_TTL_HOURS: 24
+    volumes:
+      - results:/data
+      - models:/home/sing/.cache/torch
+    restart: unless-stopped
+volumes:
+  results:
+  models:

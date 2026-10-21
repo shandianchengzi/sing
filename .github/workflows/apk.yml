@@ -23,6 +23,13 @@ jobs:
           packages: platform-tools
           log-accepted-android-sdk-licenses: false
       - run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Test self-hosted API protocol
+        run: |
+          python -m pip install fastapi==0.115.6 httpx==0.28.1
+          python server/test_api.py
       - run: bash tests/run.sh
       - name: Restore fixed signing key
         env:
@@ -40,20 +47,24 @@ jobs:
           SIGNING_KEYSTORE: build/fixed.jks
           SIGNING_PASSWORD: ${{ secrets.SING_KEYSTORE_PASSWORD || 'android' }}
           VERSION_CODE: ${{ github.run_number }}
-          VERSION_NAME: 1.2.${{ github.run_number }}
+          VERSION_NAME: 1.3.${{ github.run_number }}
         run: |
           export VERSION_CODE=$((VERSION_CODE + 1000))
           bash build.sh
       - name: Remove signing key
         if: always()
         run: rm -f build/fixed.jks
+      - name: Package self-hosted server
+        run: zip -j build/sing-server.zip server/app.py server/requirements.txt server/Dockerfile server/compose.yaml server/README.md server/test_api.py server/smoke_test.py
       - uses: actions/upload-artifact@v4
         with:
           name: sing-apk
-          path: build/sing.apk
+          path: |
+            build/sing.apk
+            build/sing-server.zip
       - name: Publish development APK
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release view preview >/dev/null 2>&1 || gh release create preview --prerelease --title '轻唱 · 最新测试版' --notes '原生轻量 Android APK；人声单独保存。自动构建，真机兼容性请实测。沿用固定签名，可覆盖安装保留数据。'
-          gh release upload preview build/sing.apk --clobber
+          gh release upload preview build/sing.apk build/sing-server.zip --clobber

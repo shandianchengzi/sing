@@ -4,3 +4,7 @@
 
 *.jks
 *.keystore
+
+/server/.env
+/server/data/
+**/__pycache__/
