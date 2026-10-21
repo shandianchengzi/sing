@@ -21,11 +21,16 @@ if [[ -n "${VERSION_NAME:-}" ]]; then version_args+=(--version-name "$VERSION_NA
 "$BT/aapt2" link -o build/base.apk -I "$API" --manifest app/src/main/AndroidManifest.xml "${version_args[@]}" build/resources.zip
 javac -encoding UTF-8 -source 8 -target 8 -bootclasspath "$API:$BT/core-lambda-stubs.jar" -d build/classes app/src/main/java/com/shandian/sing/*.java
 find build/classes -name '*.class' > build/classes.list
-"$BT/d8" --release --min-api 26 --lib "$API" --output build/dex @build/classes.list
+if [[ "${NO_SHRINK:-0}" == 1 ]]; then
+  "$BT/d8" --release --min-api 26 --lib "$API" --output build/dex @build/classes.list
+else
+  jar cf build/classes.jar -C build/classes .
+  java -Xmx1g -cp "$BT/lib/d8.jar" com.android.tools.r8.R8 --release --min-api 26 --lib "$API" --pg-conf shrink-rules.pro --output build/dex build/classes.jar
+fi
 cp build/base.apk build/unsigned.apk
 (cd build/dex && zip -q -9 ../unsigned.apk classes.dex)
 "$BT/zipalign" -f 4 build/unsigned.apk build/aligned.apk
-"$BT/apksigner" sign --ks "$KEYSTORE" --ks-pass env:SIGNING_PASSWORD --ks-key-alias "${SIGNING_ALIAS:-androiddebugkey}" --out build/sing.apk build/aligned.apk
+"$BT/apksigner" sign --v1-signing-enabled false --ks "$KEYSTORE" --ks-pass env:SIGNING_PASSWORD --ks-key-alias "${SIGNING_ALIAS:-androiddebugkey}" --out build/sing.apk build/aligned.apk
 expected="$(tr -d '[:space:]' < signing/certificate.sha256)"
 actual="$("$BT/apksigner" verify --print-certs build/sing.apk | sed -n 's/^Signer #1 certificate SHA-256 digest: //p')"
 if [[ "$actual" != "$expected" ]]; then

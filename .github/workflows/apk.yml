@@ -47,7 +47,7 @@ jobs:
           SIGNING_KEYSTORE: build/fixed.jks
           SIGNING_PASSWORD: ${{ secrets.SING_KEYSTORE_PASSWORD || 'android' }}
           VERSION_CODE: ${{ github.run_number }}
-          VERSION_NAME: 1.4.${{ github.run_number }}
+          VERSION_NAME: 1.5.${{ github.run_number }}
         run: |
           export VERSION_CODE=$((VERSION_CODE + 1000))
           bash build.sh
@@ -68,3 +68,4 @@ jobs:
         run: |
           gh release view preview >/dev/null 2>&1 || gh release create preview --prerelease --title '轻唱 · 最新测试版' --notes '原生轻量 Android APK；人声单独保存。自动构建，真机兼容性请实测。沿用固定签名，可覆盖安装保留数据。'
           gh release upload preview build/sing.apk build/sing-server.zip --clobber
+          gh release edit preview --title '轻唱 · 最新测试版' --notes '支持从伴奏当前位置录音、同步拖动回听、仅人声/混音/双轨导出。沿用固定签名，覆盖安装保留数据。LRC 可用电脑软件 163MusicLyrics 获取；部署说明和验证范围见仓库 README。'
