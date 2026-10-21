@@ -27,8 +27,7 @@ else
   jar cf build/classes.jar -C build/classes .
   java -Xmx1g -cp "$BT/lib/d8.jar" com.android.tools.r8.R8 --release --min-api 26 --lib "$API" --pg-conf shrink-rules.pro --output build/dex build/classes.jar
 fi
-cp build/base.apk build/unsigned.apk
-(cd build/dex && zip -q -9 ../unsigned.apk classes.dex)
+python scripts/pack_apk.py build/base.apk build/dex/classes.dex build/unsigned.apk
 "$BT/zipalign" -f 4 build/unsigned.apk build/aligned.apk
 "$BT/apksigner" sign --v1-signing-enabled false --ks "$KEYSTORE" --ks-pass env:SIGNING_PASSWORD --ks-key-alias "${SIGNING_ALIAS:-androiddebugkey}" --out build/sing.apk build/aligned.apk
 expected="$(tr -d '[:space:]' < signing/certificate.sha256)"

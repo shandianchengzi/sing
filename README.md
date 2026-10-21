@@ -1,6 +1,6 @@
 # 轻唱 Sing
 
-原生 Android 轻量录歌工具，Java + 系统 API，无第三方运行库、无 FFmpeg、无 WebView。安装包约 45 KB（实际大小见构建日志）。Android 8.0 及以上。
+原生 Android 轻量录歌工具，Java + 系统 API，无第三方运行库、无 FFmpeg、无 WebView。安装包约 58 KB（实际大小见构建日志）。Android 8.0 及以上。
 
 [下载最新测试版 APK](https://github.com/shandianchengzi/sing/releases/download/preview/sing.apk) · [仓库内 APK](https://github.com/shandianchengzi/sing/raw/refs/heads/main/apk/sing.apk) · [自动构建](https://github.com/shandianchengzi/sing/actions)
 
@@ -46,7 +46,9 @@
 
 ## 构建
 
-JDK 17、Android SDK Platform 35 和 Build Tools 35.0.0，系统命令 `zip`。
+JDK 17、Android SDK Platform 35、Build Tools 35.0.0 和 Python 3。先运行 `python -m pip install -r requirements-build.txt` 安装仅在构建阶段使用的压缩器；不会增加 APK 的运行依赖。
+
+APK 使用兼容 Android ZIP 格式的 Zopfli DEFLATE 压缩，保留不可压缩的资源表布局，再执行 zipalign 和原固定签名。打包器逐项校验解压后的字节一致。相同功能与许可全文下，本次本地包由 61,801 字节缩小至 57,681 字节（约 6.7%）；实际发布体积随版本信息略有变化。
 
 ```sh
 sdkmanager 'platforms;android-35' 'build-tools;35.0.0'

@@ -28,7 +28,7 @@ jobs:
           python-version: '3.11'
       - name: Test self-hosted API protocol
         run: |
-          python -m pip install fastapi==0.115.6 httpx==0.28.1
+          python -m pip install -r requirements-build.txt fastapi==0.115.6 httpx==0.28.1
           python server/test_api.py
       - run: bash tests/run.sh
       - name: Restore fixed signing key

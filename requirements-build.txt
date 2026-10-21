@@ -1,0 +1,2 @@
+# Build-time DEFLATE compressor; never bundled in the APK.
+zopfli==0.4.0
