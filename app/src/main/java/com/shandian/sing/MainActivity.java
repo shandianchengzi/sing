@@ -24,6 +24,9 @@ public class MainActivity extends Activity {
   EditText shift;
   MediaPlayer player;
   TakePlayback replay;
+  TakeInfo replayInfo;
+  float voiceGain = 1, backingGain = 1, pendingVoiceGain = 1, pendingBackingGain = 1;
+  int seekVersion;
   MediaRecorder recorder;
   Uri audio;
   File take, pending;
@@ -166,15 +169,15 @@ public class MainActivity extends Activity {
             () -> {
               if (!ready || recording || starting || previewSeeking || exporting || separating)
                 return;
-              int at = replay != null && replay.ready ? replay.position() : -1;
-              stopVoice();
-              if (at >= 0) {
-                movePreview(
-                    at,
-                    () -> {
-                      requestFocus();
-                      player.start();
-                    });
+              if (replay != null) {
+                replayPosition(
+                    at ->
+                        movePreview(
+                            at,
+                            () -> {
+                              requestFocus();
+                              player.start();
+                            }));
                 return;
               }
               if (player.isPlaying()) {
@@ -191,6 +194,10 @@ public class MainActivity extends Activity {
               if (recording) finishTake();
               else begin();
             });
+    voiceGain = preferences.getFloat("voice_gain", 1);
+    backingGain = preferences.getFloat("backing_gain", 1);
+    volume("人声", true);
+    volume("伴奏", false);
     listen = button("回听最近录音", () -> playTake());
     export = button("导出最近录音", () -> exportOptions());
     button("已保存的录音", () -> chooseTake());
@@ -200,6 +207,46 @@ public class MainActivity extends Activity {
     controls();
     restoreSession();
     handler.post(tick);
+  }
+
+  void volume(String name, boolean vocal) {
+    TextView label =
+        text(name + "音量：" + Math.round((vocal ? voiceGain : backingGain) * 100) + "%", 14);
+    SeekBar bar = new SeekBar(this);
+    bar.setMax(100);
+    bar.setProgress(Math.round((vocal ? voiceGain : backingGain) * 100));
+    root.addView(bar);
+    bar.setOnSeekBarChangeListener(
+        new SeekBar.OnSeekBarChangeListener() {
+          public void onStartTrackingTouch(SeekBar b) {}
+
+          public void onStopTrackingTouch(SeekBar b) {}
+
+          public void onProgressChanged(SeekBar b, int value, boolean user) {
+            label.setText(name + "音量：" + value + "%");
+            if (vocal) voiceGain = value / 100f;
+            else backingGain = value / 100f;
+            preferences
+                .edit()
+                .putFloat("voice_gain", voiceGain)
+                .putFloat("backing_gain", backingGain)
+                .apply();
+            if (replay != null) replay.levels(voiceGain, backingGain);
+            if (ready) player.setVolume(backingGain, backingGain);
+          }
+        });
+  }
+
+  void replayPosition(java.util.function.IntConsumer action) {
+    int at = replay != null && replay.ready ? replay.position() : player.getCurrentPosition();
+    String source = replayInfo == null ? loadedSource : replayInfo.source;
+    stopVoice();
+    if (!source.isEmpty() && (!ready || !source.equals(loadedSource))) {
+      originalAudio = source;
+      Uri uri = Uri.parse(source);
+      importAudio(uri, name(uri));
+      afterAudioReady = () -> action.accept(at);
+    } else action.accept(at);
   }
 
   TextView text(String s, int size) {
@@ -238,7 +285,10 @@ public class MainActivity extends Activity {
     preview.setEnabled(ready && !busy);
     seek.setEnabled((ready || (replay != null && replay.ready)) && !busy);
     listen.setEnabled(!busy && take != null);
-    listen.setText(replay != null && replay.playing ? "暂停回听" : "回听最近录音 / 继续");
+    listen.setText(
+        replay != null && !replay.ready
+            ? "取消准备回听"
+            : replay != null && replay.playing ? "暂停回听" : "回听最近录音 / 继续");
     export.setEnabled(!busy && take != null);
   }
 
@@ -546,6 +596,7 @@ public class MainActivity extends Activity {
       player.setOnPreparedListener(
           p -> {
             ready = true;
+            p.setVolume(backingGain, backingGain);
             seek.setMax(p.getDuration());
             song.setText(title);
             message("伴奏已就绪");
@@ -633,33 +684,50 @@ public class MainActivity extends Activity {
       requestPermissions(new String[] {Manifest.permission.RECORD_AUDIO}, 9);
       return;
     }
-    int position = replay != null && replay.ready ? replay.position() : player.getCurrentPosition();
-    stopVoice();
-    player.pause();
-    if (position >= player.getDuration() - 100) {
-      message("已到伴奏结尾，请拖动到想录制的位置");
-      return;
-    }
-    starting = true;
-    controls();
-    movePreview(
-        position,
-        () -> {
-          if (starting) startRecorder();
+    replayPosition(
+        position -> {
+          player.pause();
+          if (position >= player.getDuration() - 100) {
+            message("已到伴奏结尾，请拖动到想录制的位置");
+            return;
+          }
+          starting = true;
+          controls();
+          movePreview(
+              position,
+              () -> {
+                if (starting) startRecorder();
+              });
         });
   }
 
   void movePreview(int position, Runnable after) {
+    final int version = ++seekVersion;
     previewSeeking = true;
     controls();
     player.setOnSeekCompleteListener(
         p -> {
+          if (version != seekVersion) return;
+          ++seekVersion;
           p.setOnSeekCompleteListener(null);
           previewSeeking = false;
           if (after != null) after.run();
           controls();
         });
     player.seekTo(position, MediaPlayer.SEEK_CLOSEST);
+    handler.postDelayed(
+        () -> {
+          if (version != seekVersion || !previewSeeking) return;
+          ++seekVersion;
+          previewSeeking = false;
+          starting = false;
+          previewSeeking = false;
+          ++seekVersion;
+          if (player != null) player.setOnSeekCompleteListener(null);
+          message("伴奏定位超时，请重试或重新导入伴奏");
+          controls();
+        },
+        3000);
   }
 
   void startRecorder() {
@@ -770,55 +838,58 @@ public class MainActivity extends Activity {
   void playTake() {
     if (take == null || recording || starting || separating || exporting) return;
     if (replay != null) {
-      requestFocus();
-      replay.toggle();
+      if (!replay.ready) {
+        stopVoice();
+        message("已取消准备回听");
+      } else {
+        requestFocus();
+        replay.toggle();
+      }
       controls();
       return;
     }
     try {
-      TakeInfo info = TakeInfo.read(take, originalAudio);
-      Runnable startReplay =
-          () -> {
-            try {
-              if (ready) player.pause();
-              requestFocus();
-              replay =
-                  new TakePlayback(
-                      this,
-                      take,
-                      info,
-                      new TakePlayback.Listener() {
-                        public void changed() {
-                          controls();
-                        }
+      ++seekVersion;
+      previewSeeking = false;
+      if (player != null) {
+        player.setOnSeekCompleteListener(null);
+        if (ready) player.pause();
+      }
+      requestFocus();
+      replayInfo = TakeInfo.read(take, originalAudio);
+      replay =
+          new TakePlayback(
+              this,
+              take,
+              replayInfo,
+              voiceGain,
+              backingGain,
+              new TakePlayback.Listener() {
+                public void changed() {
+                  controls();
+                  if (replay != null && replay.ready)
+                    message(
+                        replayInfo.legacy
+                            ? "旧录音按 00:00 对齐当前伴奏，请确认伴奏正确"
+                            : "同步回听：拖动进度条定位，音量设置同时用于导出");
+                }
 
-                        public void failed(Exception e) {
-                          replay = null;
-                          error(e);
-                          controls();
-                        }
-                      });
-              message(
-                  info.legacy
-                      ? "旧录音没有起点信息，暂按 00:00 对齐当前伴奏；请确认伴奏正确"
-                      : "回听中：进度条同步控制人声和伴奏，范围限于本次录制时段");
-            } catch (Exception e) {
-              error(e);
-              controls();
-            }
-          };
-      if (!info.source.isEmpty() && (!ready || !info.source.equals(loadedSource))) {
-        originalAudio = info.source;
-        Uri uri = Uri.parse(info.source);
-        importAudio(uri, name(uri));
-        afterAudioReady = startReplay;
-      } else startReplay.run();
+                public void failed(Exception e) {
+                  stopVoice();
+                  error(e);
+                  controls();
+                }
+              });
+      message("正在准备人声和伴奏…再次点击可取消");
+      controls();
     } catch (Exception e) {
       error(e);
+      controls();
     }
   }
 
   void stopVoice() {
+    replayInfo = null;
     if (replay != null) {
       replay.close();
       replay = null;
@@ -844,7 +915,9 @@ public class MainActivity extends Activity {
     new AlertDialog.Builder(this)
         .setTitle("导出录音")
         .setItems(
-            new String[] {"仅导出人声（M4A）", "人声＋伴奏混音（WAV，本次录制时段）", "人声和原伴奏分别导出（ZIP，含起点说明）"},
+            new String[] {
+              "仅导出人声（调节音量后为 WAV，否则 M4A）", "人声＋伴奏混音（WAV，本次录制时段）", "分别导出人声和伴奏（ZIP，本次时段，应用音量）"
+            },
             (d, mode) -> {
               try {
                 TakeInfo info =
@@ -855,9 +928,17 @@ public class MainActivity extends Activity {
                       pending = take;
                       pendingInfo = info;
                       pendingMode = mode;
-                      String suffix = mode == 0 ? "_人声.m4a" : mode == 1 ? "_混音.wav" : "_双轨.zip";
+                      pendingVoiceGain = voiceGain;
+                      pendingBackingGain = backingGain;
+                      boolean original = mode == 0 && pendingVoiceGain == 1;
+                      String suffix =
+                          mode == 0
+                              ? (original ? "_人声.m4a" : "_人声.wav")
+                              : mode == 1 ? "_混音.wav" : "_双轨.zip";
                       String mime =
-                          mode == 0 ? "audio/mp4" : mode == 1 ? "audio/wav" : "application/zip";
+                          mode == 0
+                              ? (original ? "audio/mp4" : "audio/wav")
+                              : mode == 1 ? "audio/wav" : "application/zip";
                       startActivityForResult(
                           new Intent(Intent.ACTION_CREATE_DOCUMENT)
                               .setType(mime)
@@ -885,6 +966,7 @@ public class MainActivity extends Activity {
     final File file = pending;
     final TakeInfo info = pendingInfo;
     final int mode = pendingMode;
+    final float vocals = pendingVoiceGain, music = pendingBackingGain;
     pending = null;
     stopVoice();
     if (ready) player.pause();
@@ -905,7 +987,8 @@ public class MainActivity extends Activity {
             () -> {
               Exception failure = null;
               try {
-                TakeExport.write(getApplicationContext(), file, info, mode, destination);
+                TakeExport.write(
+                    getApplicationContext(), file, info, mode, destination, vocals, music);
               } catch (Exception e) {
                 failure = e;
               }
@@ -930,10 +1013,13 @@ public class MainActivity extends Activity {
       change -> {
         if (change < 0) {
           starting = false;
+          previewSeeking = false;
+          ++seekVersion;
           if (player != null) player.setOnSeekCompleteListener(null);
           if (recording) finishTake();
           if (ready) player.pause();
           stopVoice();
+          controls();
         }
       };
 

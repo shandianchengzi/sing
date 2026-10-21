@@ -44,6 +44,13 @@ public class AudioTest {
         reader.sample(5, 48000, sample);
         check(sample[0] == 0 && sample[1] == 0);
       }
+      try (PcmAudio.Reader reader = new PcmAudio.Reader(pcm, 2, 48000)) {
+        reader.sample(2, 48000, sample);
+        check(Math.abs(sample[0] - 1837.5) < .0001);
+      }
+      check(Timeline.mix(10000, 20000, 0, 1) == 10000);
+      check(Timeline.mix(10000, 20000, 1, 0) == 5000);
+      check(Timeline.mix(10000, 20000, 0, 0) == 0);
       try (OutputStream out = new FileOutputStream(temp)) {
         for (int value : new int[] {-30000, 30000, 1000, -1000}) WaveFile.number(out, value, 2);
       }

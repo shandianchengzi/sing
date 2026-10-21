@@ -143,8 +143,15 @@ final class PcmAudio {
     long index;
 
     Reader(PcmAudio pcm) throws Exception {
+      this(pcm, 0, 48000);
+    }
+
+    Reader(PcmAudio pcm, long outputFrame, int targetRate) throws Exception {
       this.pcm = pcm;
-      input = new BufferedInputStream(new FileInputStream(pcm.file), 65536);
+      FileInputStream file = new FileInputStream(pcm.file);
+      index = outputFrame * pcm.rate / targetRate;
+      file.getChannel().position(Math.min(pcm.frames, index) * pcm.channels * 2);
+      input = new BufferedInputStream(file, 65536);
       frame(left);
       frame(right);
     }

@@ -47,7 +47,7 @@ jobs:
           SIGNING_KEYSTORE: build/fixed.jks
           SIGNING_PASSWORD: ${{ secrets.SING_KEYSTORE_PASSWORD || 'android' }}
           VERSION_CODE: ${{ github.run_number }}
-          VERSION_NAME: 1.6.${{ github.run_number }}
+          VERSION_NAME: 1.7.${{ github.run_number }}
         run: |
           export VERSION_CODE=$((VERSION_CODE + 1000))
           bash build.sh
@@ -74,4 +74,4 @@ jobs:
           gh release upload preview build/sing.apk build/sing-[0-9]*.apk build/sing-server.zip --clobber
           # Publish metadata last; existing manifests keep pointing to immutable versioned APKs.
           gh release upload preview build/update.json --clobber
-          gh release edit preview --title '轻唱 · 最新测试版' --notes '支持应用内检查、下载并校验更新，系统确认后覆盖安装；支持当前位置录音、同步回听及多种导出。沿用固定签名，覆盖安装保留数据。LRC 可用电脑软件 163MusicLyrics 获取；部署说明和验证范围见仓库 README。'
+          gh release edit preview --title '轻唱 · 最新测试版' --notes '修复回听卡住及无声；使用单音频流同步播放人声与伴奏，支持拖动及独立音量，导出应用相同音量。支持应用内下载校验更新。沿用固定签名，覆盖安装保留数据。LRC 可用电脑软件 163MusicLyrics 获取；部署说明和验证范围见仓库 README。'
