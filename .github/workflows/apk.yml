@@ -57,7 +57,7 @@ jobs:
       - name: Prepare versioned APK and update manifest
         run: python scripts/release_metadata.py build/sing.apk
       - name: Package self-hosted server
-        run: zip -j build/sing-server.zip server/app.py server/requirements.txt server/Dockerfile server/compose.yaml server/README.md server/test_api.py server/smoke_test.py
+        run: zip -j build/sing-server.zip server/app.py server/requirements.txt server/Dockerfile server/compose.yaml server/README.md server/test_api.py server/smoke_test.py LICENSE NOTICE licenses/Apache-2.0.txt
       - uses: actions/upload-artifact@v4
         with:
           name: sing-apk

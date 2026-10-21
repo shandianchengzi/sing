@@ -99,8 +99,7 @@ public class MainActivity extends Activity {
               24, 16 + in.getSystemWindowInsetTop(), 24, 16 + in.getSystemWindowInsetBottom());
           return in;
         });
-    text("轻唱", 30);
-    text("导入伴奏 · 看词录音", 14);
+    status = text("戴耳机录制；从伴奏当前位置开始，可同步回听和导出混音。", 13);
     song = text("尚未选择伴奏", 15);
     button("选择伴奏（含 OGG / MP4）", () -> pick(1, "*/*"));
     LinearLayout row = new LinearLayout(this);
@@ -202,7 +201,6 @@ public class MainActivity extends Activity {
     export = button("导出最近录音", () -> exportOptions());
     button("已保存的录音", () -> chooseTake());
     button("检查更新（应用内下载）", () -> updater.check());
-    status = text("戴耳机录制；从伴奏当前位置开始，可同步回听和导出混音。", 13);
     button("更多", () -> showMore());
     take = latest();
     controls();
@@ -278,6 +276,58 @@ public class MainActivity extends Activity {
           else pick(4, "*/*");
         });
     pageButton(content, "去人声服务设置", () -> separationSettings());
+    pageButton(content, "关于", () -> showAbout());
+  }
+
+  void showAbout() {
+    LinearLayout content = subpage("关于");
+    TextView info = new TextView(this);
+    info.setText(
+        "Copyright © 2026 shandianchengzi\n\n"
+            + "个人非商业使用免费；商业使用须付费取得书面授权。"
+            + "商业授权请通过项目仓库联系作者。\n\n"
+            + "歌词接口参考 jitwxs/163MusicLyrics，相关第三方部分保留 Apache-2.0 许可。"
+            + "既有旧版本授权不追溯撤销。");
+    info.setTextIsSelectable(true);
+    content.addView(info);
+    pageButton(
+        content,
+        "项目仓库 · shandianchengzi/sing",
+        () -> openLink("https://github.com/shandianchengzi/sing"));
+    pageButton(content, "商业授权联系", () -> openLink("https://github.com/shandianchengzi/sing/issues"));
+    pageButton(
+        content,
+        "歌词工具 · jitwxs/163MusicLyrics",
+        () -> openLink("https://github.com/jitwxs/163MusicLyrics"));
+    pageButton(
+        content,
+        "许可证与第三方声明",
+        () -> {
+          LinearLayout page = subpage("许可证与第三方声明");
+          TextView terms = new TextView(this);
+          terms.setTextIsSelectable(true);
+          try (InputStream in =
+                  getResources()
+                      .openRawResource(
+                          getResources().getIdentifier("licenses", "raw", getPackageName()));
+              ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+            byte[] buffer = new byte[4096];
+            int n;
+            while ((n = in.read(buffer)) != -1) out.write(buffer, 0, n);
+            terms.setText(new String(out.toByteArray(), StandardCharsets.UTF_8));
+          } catch (Exception e) {
+            terms.setText("请查看项目仓库 LICENSE 和 NOTICE。");
+          }
+          page.addView(terms);
+        });
+  }
+
+  void openLink(String url) {
+    try {
+      startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
+    } catch (ActivityNotFoundException e) {
+      Toast.makeText(this, url, Toast.LENGTH_LONG).show();
+    }
   }
 
   org.json.JSONArray library() {

@@ -3,3 +3,8 @@ LyricsApi.java adapts the NetEase lyric retrieval and AES/RSA request flow from:
 Copyright jitwxs and contributors, licensed under Apache License 2.0.
 Original: cross-platform/MusicLyricApp/Core/Service/Music/NetEaseMusicNativeApi.cs
 Original project and trademark ownership remain with their respective holders.
+
+Sing application updates: Copyright (c) 2026 shandianchengzi.
+Project-owned code is offered under LICENSE from the licensing-change version onward.
+The Apache-2.0 terms for third-party and previously licensed portions remain applicable.
+Full Apache-2.0 text: licenses/Apache-2.0.txt; also bundled in the APK's license viewer.
