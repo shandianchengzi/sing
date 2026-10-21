@@ -6,6 +6,10 @@ import java.io.*;
 
 /** Shared decoded sources for synchronized playback and exports. */
 final class TakeAudio implements AutoCloseable {
+  private static TakeAudio cached;
+  private static String cacheKey;
+  private int users = 1;
+  private boolean retained;
   final PcmAudio voice, backing;
   final long startMs, frames;
 
@@ -14,6 +18,36 @@ final class TakeAudio implements AutoCloseable {
     this.backing = backing;
     this.startMs = startMs;
     frames = voice.frames * 48000 / voice.rate;
+  }
+
+  // Retain one decoded take, bounded to 128 MB. Active readers survive cache replacement.
+  static synchronized TakeAudio preparePlayback(Context context, File file, TakeInfo info)
+      throws Exception {
+    String sourceStamp = info.source;
+    if (info.source.startsWith("file:")) {
+      File source = new File(Uri.parse(info.source).getPath());
+      sourceStamp += ":" + source.length() + ":" + source.lastModified();
+    }
+    String key = file.getCanonicalPath() + ":" + file.length() + ":" + file.lastModified()
+        + ":" + info.startMs + ":" + sourceStamp;
+    if (cached != null && key.equals(cacheKey)
+        && cached.voice.file.isFile() && cached.backing.file.isFile()) {
+      cached.users++;
+      return cached;
+    }
+    TakeAudio next = prepare(context, file, info, true);
+    if (cached != null) {
+      cached.retained = false;
+      if (cached.users == 0) cached.delete();
+      cached = null;
+      cacheKey = null;
+    }
+    if (next.voice.file.length() + next.backing.file.length() <= 128L * 1024 * 1024) {
+      next.retained = true;
+      cached = next;
+      cacheKey = key;
+    }
+    return next;
   }
 
   static TakeAudio prepare(Context context, File file, TakeInfo info, boolean needBacking)
@@ -72,6 +106,12 @@ final class TakeAudio implements AutoCloseable {
 
   @Override
   public void close() {
+    synchronized (TakeAudio.class) {
+      if (--users == 0 && !retained) delete();
+    }
+  }
+
+  private void delete() {
     voice.file.delete();
     if (backing != null) backing.file.delete();
   }
