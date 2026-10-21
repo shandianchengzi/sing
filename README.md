@@ -1,12 +1,13 @@
 # 轻唱 Sing
 
-原生 Android 轻量录歌工具，Java + 系统 API，无第三方运行库、无 FFmpeg、无 WebView。安装包约 25 KB（实际大小见构建日志）。Android 8.0 及以上。
+原生 Android 轻量录歌工具，Java + 系统 API，无第三方运行库、无 FFmpeg、无 WebView。安装包约 29 KB（实际大小见构建日志）。Android 8.0 及以上。
 
 [下载最新测试版 APK](https://github.com/shandianchengzi/sing/releases/download/preview/sing.apk) · [仓库内 APK](https://github.com/shandianchengzi/sing/raw/refs/heads/main/apk/sing.apk) · [自动构建](https://github.com/shandianchengzi/sing/actions)
 
 ## 使用
 
-1. 选择手机上的伴奏（系统支持的 MP3/M4A/WAV 等格式）。
+1. 选择手机上的伴奏（系统支持的 MP3/M4A/WAV 等音频格式，或 MP4 视频）。
+   MP4 会在手机本地自动无损提取第一条音轨作为伴奏，不显示或解码视频，不改变原文件；临时音轨在切换伴奏或关闭页面时删除。无音轨会提示错误，音轨编码须为系统支持的格式（推荐 AAC）。
 2. 导入 LRC，或输入网易云歌曲 ID / 含 `id=` 的完整歌曲链接获取歌词。获取失败可直接本地导入。短链接须先在浏览器展开。
 3. 试听确认歌词时间，可调整歌词延后毫秒数，负数为提前。
 4. 戴耳机，点击“从头开始录音”，停止后自动保存。伴奏结束也会自动保存。
