@@ -15,3 +15,7 @@ java -cp build/tests com.shandian.sing.UpdateTest
 
 javac -encoding UTF-8 -cp "build/tests:$API" -d build/tests app/src/main/java/com/shandian/sing/TakeInfo.java app/src/main/java/com/shandian/sing/TakeAudio.java app/src/main/java/com/shandian/sing/TakePlayback.java app/src/main/java/com/shandian/sing/TakeExport.java tests/PlaybackTest.java
 java -cp "build/tests:$API" com.shandian.sing.PlaybackTest
+
+javac -encoding UTF-8 -cp "build/tests:$API" -d build/tests app/src/main/java/com/shandian/sing/CloudNames.java app/src/main/java/com/shandian/sing/BaiduDrive.java tests/CloudTest.java
+java -cp "build/tests:$API" com.shandian.sing.CloudTest
+python tests/private_config_test.py

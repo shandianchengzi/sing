@@ -8,3 +8,6 @@
 /server/.env
 /server/data/
 **/__pycache__/
+
+# Personal API credentials are generated under build/res, never source-controlled.
+/app/src/main/res/raw/baidu_config.json

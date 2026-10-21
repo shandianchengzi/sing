@@ -17,9 +17,11 @@ import java.util.regex.*;
 
 public class MainActivity extends Activity {
   AppUpdater updater;
+  BaiduLibrary cloud;
   LinearLayout root;
   FrameLayout pages;
   View homePage, secondaryPage;
+  boolean libraryPage;
   TextView status, song, previous, current, next, clock;
   Button record, preview, listen, export;
   SeekBar seek;
@@ -78,6 +80,7 @@ public class MainActivity extends Activity {
   public void onCreate(Bundle state) {
     super.onCreate(state);
     preferences = getSharedPreferences("session", MODE_PRIVATE);
+    cloud = new BaiduLibrary(this);
     updater =
         new AppUpdater(
             this, () -> !recording && !starting && !previewSeeking && !separating && !exporting);
@@ -218,6 +221,7 @@ public class MainActivity extends Activity {
 
   LinearLayout subpage(String title) {
     returnHome();
+    libraryPage = false;
     ScrollView scroll = new ScrollView(this);
     scroll.setFillViewport(true);
     LinearLayout content = new LinearLayout(this);
@@ -250,6 +254,7 @@ public class MainActivity extends Activity {
   }
 
   void returnHome() {
+    if (cloud != null) cloud.cancel();
     if (secondaryPage != null) {
       ((android.view.inputmethod.InputMethodManager) getSystemService(INPUT_METHOD_SERVICE))
           .hideSoftInputFromWindow(secondaryPage.getWindowToken(), 0);
@@ -276,6 +281,7 @@ public class MainActivity extends Activity {
           else pick(4, "*/*");
         });
     pageButton(content, "去人声服务设置", () -> separationSettings());
+    pageButton(content, "百度网盘登录与曲库", () -> cloud.show());
     pageButton(content, "关于", () -> showAbout());
   }
 
@@ -418,6 +424,8 @@ public class MainActivity extends Activity {
   void showLibrary() {
     if (!canNavigate()) return;
     LinearLayout content = subpage("本地曲库");
+    libraryPage = true;
+    pageButton(content, "百度网盘曲库", () -> cloud.show());
     TextView help = new TextView(this);
     help.setText("选过的伴奏会自动加入，按最近使用排序。长按可移出列表，原文件不会删除。");
     content.addView(help);
@@ -939,7 +947,7 @@ public class MainActivity extends Activity {
             seek.setMax(p.getDuration());
             org.json.JSONObject item = libraryItem(source);
             song.setText(item == null ? title : item.optString("title", title));
-            if (secondaryPage != null) showLibrary();
+            if (secondaryPage != null && libraryPage) showLibrary();
             message("伴奏已就绪");
             controls();
             Runnable action = afterAudioReady;
@@ -1400,6 +1408,7 @@ public class MainActivity extends Activity {
 
   @Override
   protected void onDestroy() {
+    if (cloud != null) cloud.cancel();
     if (updater != null) updater.close();
     if (exportThread != null) exportThread.interrupt();
     if (exportProgress != null) exportProgress.dismiss();

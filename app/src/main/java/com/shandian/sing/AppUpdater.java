@@ -100,6 +100,33 @@ final class AppUpdater {
   }
 
   void check() {
+    if (activity.getResources().getIdentifier("baidu_config", "raw", activity.getPackageName())
+        != 0) {
+      if (!idle.getAsBoolean()) {
+        notice("请先完成当前操作");
+        return;
+      }
+      new AlertDialog.Builder(activity)
+          .setTitle("私有版更新")
+          .setMessage("此仓库已私有，请在浏览器登录你的 GitHub 账号，下载 Release 中的 sing.apk 覆盖安装。录音和设置会保留。")
+          .setNegativeButton("取消", null)
+          .setPositiveButton(
+              "打开私有下载页",
+              (d, w) -> {
+                try {
+                  activity.startActivity(
+                      new Intent(
+                          Intent.ACTION_VIEW,
+                          Uri.parse(
+                              "https://github.com/shandianchengzi/sing/releases/tag/preview")));
+                } catch (ActivityNotFoundException e) {
+                  notice("请安装浏览器后访问 GitHub 仓库");
+                }
+              })
+          .show();
+      return;
+    }
+
     if (busy) {
       notice("正在检查或下载更新");
       return;

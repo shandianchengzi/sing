@@ -14,7 +14,12 @@ fi
 export SIGNING_PASSWORD="${SIGNING_PASSWORD:-android}"
 mkdir -p build/classes build/dex
 rm -rf build/classes/* build/dex/*
-"$BT/aapt2" compile --dir app/src/main/res -o build/resources.zip
+rm -rf build/res
+cp -R app/src/main/res build/res
+python scripts/private_config.py
+trap 'python scripts/private_config.py --clean' EXIT
+"$BT/aapt2" compile --dir build/res -o build/resources.zip
+python scripts/private_config.py --clean
 version_args=(--replace-version)
 if [[ -n "${VERSION_CODE:-}" ]]; then version_args+=(--version-code "$VERSION_CODE"); fi
 if [[ -n "${VERSION_NAME:-}" ]]; then version_args+=(--version-name "$VERSION_NAME"); fi
