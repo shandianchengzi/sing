@@ -18,6 +18,8 @@ import java.util.regex.*;
 public class MainActivity extends Activity {
   AppUpdater updater;
   LinearLayout root;
+  FrameLayout pages;
+  View homePage, secondaryPage;
   TextView status, song, previous, current, next, clock;
   Button record, preview, listen, export;
   SeekBar seek;
@@ -87,7 +89,10 @@ public class MainActivity extends Activity {
     ScrollView page = new ScrollView(this);
     page.setFillViewport(true);
     page.addView(root);
-    setContentView(page);
+    pages = new FrameLayout(this);
+    homePage = page;
+    pages.addView(homePage);
+    setContentView(pages);
     root.setOnApplyWindowInsetsListener(
         (v, in) -> {
           v.setPadding(
@@ -98,16 +103,7 @@ public class MainActivity extends Activity {
     text("导入伴奏 · 看词录音", 14);
     song = text("尚未选择伴奏", 15);
     button("选择伴奏（含 OGG / MP4）", () -> pick(1, "*/*"));
-    button(
-        "上传歌曲去人声",
-        () -> {
-          if (preferences.getString("server", "").isEmpty()) {
-            separationSettings();
-            return;
-          }
-          pick(4, "*/*");
-        });
-    button("去人声服务设置", () -> separationSettings());
+    button("本地曲库", () -> showLibrary());
     LinearLayout row = new LinearLayout(this);
     root.addView(row);
     Button local = new Button(this);
@@ -168,7 +164,11 @@ public class MainActivity extends Activity {
             "试听伴奏 / 暂停",
             () -> {
               if ((!ready && replay == null)
-                  || recording || starting || previewSeeking || exporting || separating) return;
+                  || recording
+                  || starting
+                  || previewSeeking
+                  || exporting
+                  || separating) return;
               if (replay != null) {
                 replayPosition(
                     at ->
@@ -203,10 +203,189 @@ public class MainActivity extends Activity {
     button("已保存的录音", () -> chooseTake());
     button("检查更新（应用内下载）", () -> updater.check());
     status = text("戴耳机录制；从伴奏当前位置开始，可同步回听和导出混音。", 13);
+    button("更多", () -> showMore());
     take = latest();
     controls();
     restoreSession();
     handler.post(tick);
+  }
+
+  boolean canNavigate() {
+    if (recording || starting || previewSeeking || separating || exporting) {
+      message("请先完成当前录音或处理");
+      return false;
+    }
+    return true;
+  }
+
+  LinearLayout subpage(String title) {
+    returnHome();
+    ScrollView scroll = new ScrollView(this);
+    scroll.setFillViewport(true);
+    LinearLayout content = new LinearLayout(this);
+    content.setOrientation(1);
+    content.setPadding(24, root.getPaddingTop(), 24, root.getPaddingBottom() + 16);
+    content.setOnApplyWindowInsetsListener(
+        (v, in) -> {
+          v.setPadding(
+              24, 16 + in.getSystemWindowInsetTop(), 24, 24 + in.getSystemWindowInsetBottom());
+          return in;
+        });
+    content.setBackgroundColor(0xfff5f6f2);
+    scroll.addView(content);
+    pageButton(content, "返回", () -> returnHome());
+    TextView heading = new TextView(this);
+    heading.setText(title);
+    heading.setTextSize(26);
+    content.addView(heading);
+    secondaryPage = scroll;
+    homePage.setVisibility(View.GONE);
+    pages.addView(scroll);
+    return content;
+  }
+
+  void pageButton(LinearLayout parent, String title, Runnable action) {
+    Button button = new Button(this);
+    button.setText(title);
+    parent.addView(button);
+    button.setOnClickListener(v -> action.run());
+  }
+
+  void returnHome() {
+    if (secondaryPage != null) {
+      ((android.view.inputmethod.InputMethodManager) getSystemService(INPUT_METHOD_SERVICE))
+          .hideSoftInputFromWindow(secondaryPage.getWindowToken(), 0);
+      pages.removeView(secondaryPage);
+      secondaryPage = null;
+    }
+    homePage.setVisibility(View.VISIBLE);
+  }
+
+  @Override
+  public void onBackPressed() {
+    if (secondaryPage != null) returnHome();
+    else super.onBackPressed();
+  }
+
+  void showMore() {
+    if (!canNavigate()) return;
+    LinearLayout content = subpage("更多");
+    pageButton(
+        content,
+        "上传歌曲去人声",
+        () -> {
+          if (preferences.getString("server", "").isEmpty()) separationSettings();
+          else pick(4, "*/*");
+        });
+    pageButton(content, "去人声服务设置", () -> separationSettings());
+  }
+
+  org.json.JSONArray library() {
+    try {
+      return new org.json.JSONArray(preferences.getString("library", "[]"));
+    } catch (org.json.JSONException e) {
+      return new org.json.JSONArray();
+    }
+  }
+
+  void rememberAudio(String source, String title) {
+    if (source.isEmpty()) return;
+    org.json.JSONArray list = library(), updated = new org.json.JSONArray();
+    try {
+      updated.put(new org.json.JSONObject().put("uri", source).put("title", title));
+      for (int i = 0; i < list.length(); i++) {
+        org.json.JSONObject item = list.optJSONObject(i);
+        if (item != null && !source.equals(item.optString("uri"))) updated.put(item);
+      }
+      preferences.edit().putString("library", updated.toString()).apply();
+    } catch (org.json.JSONException ignored) {
+    }
+  }
+
+  void showLibrary() {
+    if (!canNavigate()) return;
+    LinearLayout content = subpage("本地曲库");
+    TextView help = new TextView(this);
+    help.setText("选过的伴奏会自动加入，按最近使用排序。长按可移出列表，原文件不会删除。");
+    content.addView(help);
+    pageButton(
+        content,
+        "添加伴奏",
+        () -> {
+          returnHome();
+          pick(1, "*/*");
+        });
+    EditText search = new EditText(this);
+    search.setSingleLine(true);
+    search.setHint("搜索伴奏");
+    content.addView(search);
+    LinearLayout list = new LinearLayout(this);
+    list.setOrientation(1);
+    content.addView(list);
+    search.addTextChangedListener(
+        new android.text.TextWatcher() {
+          public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+
+          public void onTextChanged(CharSequence s, int start, int before, int count) {
+            renderLibrary(list, s.toString());
+          }
+
+          public void afterTextChanged(android.text.Editable text) {}
+        });
+    renderLibrary(list, "");
+  }
+
+  void renderLibrary(LinearLayout parent, String query) {
+    parent.removeAllViews();
+    org.json.JSONArray entries = library();
+    String filter = query.toLowerCase(java.util.Locale.ROOT);
+    int shown = 0;
+    for (int i = 0; i < entries.length(); i++) {
+      org.json.JSONObject item = entries.optJSONObject(i);
+      if (item == null) continue;
+      String source = item.optString("uri"), title = item.optString("title", "伴奏");
+      if (source.isEmpty() || !title.toLowerCase(java.util.Locale.ROOT).contains(filter)) continue;
+      shown++;
+      Button entry = new Button(this);
+      entry.setText(title);
+      parent.addView(entry);
+      entry.setOnClickListener(
+          v -> {
+            returnHome();
+            try {
+              originalAudio = source;
+              preferences.edit().putString("audio", source).apply();
+              importAudio(Uri.parse(source), title);
+            } catch (Exception error) {
+              message("无法打开伴奏，请重新选择原文件：" + error.getMessage());
+            }
+          });
+      entry.setOnLongClickListener(
+          v -> {
+            new AlertDialog.Builder(this)
+                .setTitle("从曲库移除？")
+                .setMessage(title + "\n只移除记录，不删除原文件。")
+                .setNegativeButton("取消", null)
+                .setPositiveButton(
+                    "移除",
+                    (d, which) -> {
+                      org.json.JSONArray current = library(), kept = new org.json.JSONArray();
+                      for (int j = 0; j < current.length(); j++) {
+                        org.json.JSONObject row = current.optJSONObject(j);
+                        if (row != null && !source.equals(row.optString("uri"))) kept.put(row);
+                      }
+                      preferences.edit().putString("library", kept.toString()).apply();
+                      renderLibrary(parent, query);
+                    })
+                .show();
+            return true;
+          });
+    }
+    if (shown == 0) {
+      TextView empty = new TextView(this);
+      empty.setText(query.isEmpty() ? "暂无伴奏，点击添加伴奏即可建立曲库。" : "没有匹配的伴奏");
+      parent.addView(empty);
+    }
   }
 
   void volume(String name, boolean vocal) {
@@ -381,6 +560,7 @@ public class MainActivity extends Activity {
         }
         setLrc(s);
       } else if (code == 4) {
+        returnHome();
         startSeparation(uri, name(uri));
       } else if (code == 3 && pending != null) {
         exportTo(uri);
@@ -588,6 +768,7 @@ public class MainActivity extends Activity {
   }
 
   void openAudio(Uri uri, String title) {
+    final String source = loadedSource;
     try {
       audio = uri;
       player = new MediaPlayer();
@@ -600,6 +781,7 @@ public class MainActivity extends Activity {
       player.setOnPreparedListener(
           p -> {
             ready = true;
+            rememberAudio(source, title.replace(" · 仅音频", ""));
             p.setVolume(backingGain, backingGain);
             seek.setMax(p.getDuration());
             song.setText(title);
