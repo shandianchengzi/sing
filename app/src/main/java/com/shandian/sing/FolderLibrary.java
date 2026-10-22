@@ -139,11 +139,23 @@ final class FolderLibrary {
       Uri targetAudio, Uri targetLrc) {
     ContentResolver resolver = ctx.getContentResolver();
     int failed = 0;
-    if (sourceAudio != null && !sourceAudio.equals(targetAudio)
+    // ACTION_OPEN_DOCUMENT and tree URIs can refer to the same document with
+    // different strings. Never delete the destination after reusing a same-file entry.
+    if (sourceAudio != null && !sameDocument(sourceAudio, targetAudio)
         && !delete(resolver, sourceAudio)) failed++;
-    if (sourceLrc != null && !sourceLrc.equals(targetLrc)
+    if (sourceLrc != null && !sameDocument(sourceLrc, targetLrc)
         && !delete(resolver, sourceLrc)) failed++;
     return failed == 0 ? "" : "已复制完成，但有" + failed + "个源文件无法删除，请手动清理";
+  }
+
+  static boolean sameDocument(Uri source, Uri target) {
+    if (source == null || target == null) return false;
+    if (source.equals(target)) return true;
+    if (!java.util.Objects.equals(source.getAuthority(), target.getAuthority())) return false;
+    try {
+      return DocumentsContract.getDocumentId(source)
+          .equals(DocumentsContract.getDocumentId(target));
+    } catch (RuntimeException ignored) { return false; }
   }
 
   private static Uri findFile(Context ctx, Uri tree, String name) throws IOException {

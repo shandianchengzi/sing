@@ -660,9 +660,25 @@ public class MainActivity extends Activity {
         .setNegativeButton("取消", null).show();
   }
 
+  Uri pairedLyrics(String source, FolderLibrary.Item selected) {
+    if (selected != null && selected.lyrics != null) return selected.lyrics;
+    org.json.JSONObject row = libraryItem(source);
+    String key = selected != null ? LibraryNames.key(selected.name)
+        : row != null ? songKey(row) : "";
+    java.util.ArrayList<String> copies = groupedSources.get(key);
+    if (copies != null) {
+      for (String alternate : copies) {
+        FolderLibrary.Item found = folderItem(alternate);
+        if (found != null && found.lyrics != null) return found.lyrics;
+      }
+    }
+    return null;
+  }
+
   void selectLibraryAudio(String source, String title, FolderLibrary.Item file) {
     final int version = ++folderOpenId;
-    if (file == null || file.lyrics == null) {
+    final Uri pairing = pairedLyrics(source, file);
+    if (pairing == null) {
       originalAudio = source;
       preferences.edit().putString("audio", source).apply();
       returnHome();
@@ -672,7 +688,7 @@ public class MainActivity extends Activity {
     message("正在读取匹配的 LRC…");
     new Thread(() -> {
       try {
-        String text = FolderLibrary.readLrc(getApplicationContext(), file.lyrics);
+        String text = FolderLibrary.readLrc(getApplicationContext(), pairing);
         if (new Lrc(text).lines.isEmpty()) throw new IOException("LRC 缺少时间戳");
         handler.post(() -> {
           if (isDestroyed() || version != folderOpenId) return;
@@ -725,7 +741,8 @@ public class MainActivity extends Activity {
     }
     final boolean copyOnly = preferences.getBoolean("copy_instead_of_move", false);
     final Uri sourceAudio = Uri.parse(source);
-    final Uri oldLyrics = scanned == null ? null : scanned.lyrics;
+    final Uri oldLyrics = pairedLyrics(source, scanned);
+    final Uri ownedLyrics = scanned == null ? null : scanned.lyrics;
     final org.json.JSONObject saved = libraryItem(source);
     final String storedLrc = saved == null ? "" : saved.optString("lrc");
     final String actualName = LibraryNames.isAudio(filename) ? filename : name(sourceAudio);
@@ -759,7 +776,7 @@ public class MainActivity extends Activity {
         if (!copyOnly) {
           persistMovedReferences(source, destinationSource, title, actualName, lyricsText);
           String deletion = FolderLibrary.deleteSources(
-              getApplicationContext(), sourceAudio, oldLyrics, copied.audio, copied.lyrics);
+              getApplicationContext(), sourceAudio, ownedLyrics, copied.audio, copied.lyrics);
           if (!deletion.isEmpty()) note = deletion;
         }
       } catch (Exception e) { failure = e; }
@@ -849,14 +866,18 @@ public class MainActivity extends Activity {
       java.util.ArrayList<String> sources = groupedSources.get(songKey(item));
       int copies = sources == null ? 1 : sources.size();
       LinearLayout entryRow = new LinearLayout(this);
-      entryRow.setOrientation(LinearLayout.HORIZONTAL);
+      entryRow.setOrientation(LinearLayout.VERTICAL);
       parent.addView(entryRow);
+      LinearLayout titleRow = new LinearLayout(this);
+      entryRow.addView(titleRow);
       Button entry = new Button(this);
       entry.setText(title + (copies > 1 ? "（" + copies + " 处）" : ""));
-      entryRow.addView(entry, new LinearLayout.LayoutParams(0, -2, 1));
+      titleRow.addView(entry, new LinearLayout.LayoutParams(0, -2, 1));
       Button lyrics = new Button(this);
-      lyrics.setText(item.optString("lrc").isEmpty() && (file == null || file.lyrics == null) ? "LRC" : "LRC ✓");
-      entryRow.addView(lyrics);
+      lyrics.setText(item.optString("lrc").isEmpty() && pairedLyrics(source, file) == null ? "LRC" : "LRC ✓");
+      titleRow.addView(lyrics);
+      LinearLayout actionsRow = new LinearLayout(this);
+      entryRow.addView(actionsRow);
       lyrics.setOnClickListener(
           v -> {
             if (libraryItem(source) == null) rememberAudio(source, title);
@@ -865,7 +886,7 @@ public class MainActivity extends Activity {
           });
       Button relocate = new Button(this);
       relocate.setText("整理到");
-      entryRow.addView(relocate);
+      actionsRow.addView(relocate, new LinearLayout.LayoutParams(0, -2, 1));
       relocate.setEnabled(!scanningFolders);
       relocate.setOnClickListener(v ->
           chooseSongSource(source, chosenSource ->
@@ -875,7 +896,7 @@ public class MainActivity extends Activity {
                       folderItem(chosenSource), target))));
       Button rename = new Button(this);
       rename.setText("改名");
-      entryRow.addView(rename);
+      actionsRow.addView(rename, new LinearLayout.LayoutParams(0, -2, 1));
       rename.setOnClickListener(
           v -> {
             if (libraryItem(source) == null) rememberAudio(source, title);
@@ -1359,7 +1380,13 @@ public class MainActivity extends Activity {
                 } catch (Exception e) {
                   handler.post(
                       () -> {
-                        if (version == importVersion && !isDestroyed()) error(e);
+                        if (version == importVersion && !isDestroyed()) {
+                          starting = false;
+                          afterAudioReady = null;
+                          loadedSource = "";
+                          error(e);
+                          controls();
+                        }
                       });
                 }
               },
@@ -1423,6 +1450,7 @@ public class MainActivity extends Activity {
             if (recording) finishTake();
             releasePlayer();
             starting = false;
+            loadedSource = "";
             message("音轨无法播放，请换用系统支持的 MP3/M4A/WAV/OGG（Vorbis、Opus）或 AAC 音轨 MP4");
             controls();
             return true;
@@ -1431,6 +1459,7 @@ public class MainActivity extends Activity {
     } catch (Exception e) {
       releasePlayer();
       starting = false;
+      loadedSource = "";
       error(e);
       controls();
     }
