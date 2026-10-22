@@ -1259,13 +1259,42 @@ public class MainActivity extends Activity {
       for(Uri folder:libraryFolders) unmatched.addAll(FolderLibrary.scan(this,folder,true));
       handler.post(()->{
         if(unmatched.isEmpty()) { message("没有未规范命名的音频"); return; }
-        String[] labels=new String[unmatched.size()];
-        for(int i=0;i<labels.length;i++) labels[i]=unmatched.get(i).name+"（"+folderLabel(unmatched.get(i).folder)+"）";
-        new AlertDialog.Builder(this).setTitle("选择音频并填写歌名（原文件改名）")
-            .setItems(labels,(d,index)->{
+        java.util.ArrayList<String> labels=new java.util.ArrayList<>();
+        for(FolderLibrary.Item item:unmatched) labels.add(item.name+"（"+folderLabel(item.folder)+"）");
+        ArrayAdapter<String> adapter=new ArrayAdapter<>(this,android.R.layout.simple_list_item_1,labels);
+        AlertDialog files=new AlertDialog.Builder(this).setTitle("选择音频并填写歌名（长按删除）")
+            .setAdapter(adapter,(d,index)->{
               FolderLibrary.Item item=unmatched.get(index);
               askSong("",title->{ resolveSong(title,()->importSingle(item.audio,title,true,item.folder)); });
-            }).setNegativeButton("返回",null).show();
+            }).setNegativeButton("返回",null).create();
+        files.setOnShowListener(d->files.getListView().setOnItemLongClickListener((parent,view,index,id)->{
+          if(!canNavigate()) return true;
+          FolderLibrary.Item item=unmatched.get(index);
+          new AlertDialog.Builder(this).setTitle("是否删除这个文件？")
+              .setMessage(item.name+"\n将删除源音频文件，无法恢复。")
+              .setNegativeButton("否",null).setPositiveButton("是，删除",(confirm,which)->{
+                if(!canNavigate()) return;
+                files.getListView().setEnabled(false);
+                runLibraryWork("正在删除音频文件…",()->{
+                  try {
+                    FolderLibrary.remove(this,item.audio);
+                    handler.post(()->{
+                      int removed=unmatched.indexOf(item);
+                      if(removed>=0) { unmatched.remove(removed); adapter.remove(labels.get(removed)); }
+                      String source=item.audio.toString();
+                      if(sameSource(source,preferences.getString("audio",""))) preferences.edit().remove("audio").remove("lrc").apply();
+                      if(sameSource(source,loadedSource)) {
+                        stopVoice(); releasePlayer(); loadedSource=""; originalAudio=""; ready=false;
+                        lrc=new Lrc(""); song.setText("尚未选择伴奏"); controls();
+                      }
+                      if(unmatched.isEmpty()) files.dismiss();
+                    });
+                  } finally { handler.post(()->files.getListView().setEnabled(true)); }
+                });
+              }).show();
+          return true;
+        }));
+        files.show();
       });
     });
   }
