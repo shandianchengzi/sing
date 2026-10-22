@@ -26,6 +26,34 @@ final class FolderLibrary {
       this.audio = audio; this.lyrics = lyrics; this.warning = warning;
     }
   }
+  static class UnmatchedFile {
+    final Uri folder, uri;
+    final String name;
+    final boolean lyrics;
+    UnmatchedFile(Uri folder,Uri uri,String name,boolean lyrics) {
+      this.folder=folder; this.uri=uri; this.name=name; this.lyrics=lyrics;
+    }
+  }
+  static ArrayList<UnmatchedFile> scanUnmatched(Context ctx,Uri tree) throws IOException {
+    ArrayList<UnmatchedFile> files=new ArrayList<>();
+    Set<String> pairedTitles=new HashSet<>();
+    for(Item item:scan(ctx,tree)) pairedTitles.add(LibraryNames.key(item.name));
+    for(Item item:scan(ctx,tree,true)) files.add(new UnmatchedFile(tree,item.audio,item.name,false));
+    Uri children=DocumentsContract.buildChildDocumentsUriUsingTree(tree,DocumentsContract.getTreeDocumentId(tree));
+    try(Cursor c=ctx.getContentResolver().query(children,new String[]{
+        DocumentsContract.Document.COLUMN_DOCUMENT_ID,DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+        DocumentsContract.Document.COLUMN_MIME_TYPE},null,null,null)) {
+      if(c==null) throw new IOException("无法扫描歌词文件");
+      while(c.moveToNext()) {
+        String name=c.getString(1);
+        if(name==null || DocumentsContract.Document.MIME_TYPE_DIR.equals(c.getString(2))) continue;
+        if(LibraryNames.needsLyricsOrganization(name,pairedTitles))
+          files.add(new UnmatchedFile(tree,DocumentsContract.buildDocumentUriUsingTree(tree,c.getString(0)),name,true));
+      }
+    } catch(Exception e) { throw new IOException("无法扫描歌词文件，请检查文件夹授权",e); }
+    files.sort((a,b)->a.name.compareToIgnoreCase(b.name));
+    return files;
+  }
   private static class Entry {
     final Uri uri;
     final String name;

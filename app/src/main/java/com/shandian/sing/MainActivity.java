@@ -582,7 +582,7 @@ public class MainActivity extends Activity {
       else pick(7, "*/*");
     });
     pageButton(content, "添加单个伴奏", () -> { if(libraryFolders.isEmpty()) message("请先选择曲库文件夹"); else pick(9,"*/*"); });
-    pageButton(content, "扫描并整理未规范命名的音频", () -> scanUnmatched());
+    pageButton(content, "扫描并整理未规范命名的音频／LRC", () -> scanUnmatched());
     EditText search = new EditText(this);
     search.setSingleLine(true);
     search.setHint("搜索所有曲库");
@@ -1272,34 +1272,37 @@ public class MainActivity extends Activity {
 
   void scanUnmatched() {
     if(libraryFolders.isEmpty()) { message("请先选择曲库文件夹"); return; }
-    runLibraryWork("正在扫描未规范命名的音频…",()->{
-      java.util.ArrayList<FolderLibrary.Item> unmatched=new java.util.ArrayList<>();
-      for(Uri folder:libraryFolders) unmatched.addAll(FolderLibrary.scan(this,folder,true));
+    runLibraryWork("正在扫描未规范命名的音频及未匹配的 LRC…",()->{
+      java.util.ArrayList<FolderLibrary.UnmatchedFile> unmatched=new java.util.ArrayList<>();
+      for(Uri folder:libraryFolders) unmatched.addAll(FolderLibrary.scanUnmatched(this,folder));
       handler.post(()->{
-        if(unmatched.isEmpty()) { message("没有未规范命名的音频"); return; }
+        if(unmatched.isEmpty()) { message("没有需要整理的音频或 LRC"); return; }
         java.util.ArrayList<String> labels=new java.util.ArrayList<>();
-        for(FolderLibrary.Item item:unmatched) labels.add(item.name+"（"+folderLabel(item.folder)+"）");
+        for(FolderLibrary.UnmatchedFile item:unmatched) labels.add((item.lyrics?"LRC：":"音频：")+item.name+"（"+folderLabel(item.folder)+"）");
         ArrayAdapter<String> adapter=new ArrayAdapter<>(this,android.R.layout.simple_list_item_1,labels);
-        AlertDialog files=new AlertDialog.Builder(this).setTitle("选择音频并填写歌名（长按删除）")
+        AlertDialog files=new AlertDialog.Builder(this).setTitle("选择音频／LRC 并填写歌名（长按删除）")
             .setAdapter(adapter,(d,index)->{
-              FolderLibrary.Item item=unmatched.get(index);
-              askSong("",title->{ resolveSong(title,()->importSingle(item.audio,title,true,item.folder)); });
+              FolderLibrary.UnmatchedFile item=unmatched.get(index);
+              askSong("",title->{
+                if(item.lyrics) organizeLyrics(item,title);
+                else resolveSong(title,()->importSingle(item.uri,title,true,item.folder));
+              });
             }).setNegativeButton("返回",null).create();
         files.setOnShowListener(d->files.getListView().setOnItemLongClickListener((parent,view,index,id)->{
           if(!canNavigate()) return true;
-          FolderLibrary.Item item=unmatched.get(index);
+          FolderLibrary.UnmatchedFile item=unmatched.get(index);
           new AlertDialog.Builder(this).setTitle("是否删除这个文件？")
-              .setMessage(item.name+"\n将删除源音频文件，无法恢复。")
+              .setMessage(item.name+"\n将删除这个源文件，无法恢复。")
               .setNegativeButton("否",null).setPositiveButton("是，删除",(confirm,which)->{
                 if(!canNavigate()) return;
                 files.getListView().setEnabled(false);
-                runLibraryWork("正在删除音频文件…",()->{
+                runLibraryWork("正在删除源文件…",()->{
                   try {
-                    FolderLibrary.remove(this,item.audio);
+                    FolderLibrary.remove(this,item.uri);
                     handler.post(()->{
                       int removed=unmatched.indexOf(item);
                       if(removed>=0) { unmatched.remove(removed); adapter.remove(labels.get(removed)); }
-                      String source=item.audio.toString();
+                      String source=item.uri.toString();
                       if(sameSource(source,preferences.getString("audio",""))) preferences.edit().remove("audio").remove("lrc").apply();
                       if(sameSource(source,loadedSource)) {
                         stopVoice(); releasePlayer(); loadedSource=""; originalAudio=""; ready=false;
@@ -1316,6 +1319,30 @@ public class MainActivity extends Activity {
       });
     });
   }
+  void organizeLyrics(FolderLibrary.UnmatchedFile item,String title) {
+    runLibraryWork("正在整理 LRC…",()->{
+      String text=FolderLibrary.readLrc(this,item.uri);
+      if(new Lrc(text).lines.isEmpty()) throw new IOException("LRC 没有有效时间戳，原文件保留");
+      String filename=title+".lrc";
+      Uri collision=FolderLibrary.findFile(this,item.folder,filename);
+      if(collision!=null && !FolderLibrary.sameDocument(collision,item.uri))
+        throw new IOException("已有同名 LRC，未覆盖，请填写其他歌名");
+      Uri renamed=FolderLibrary.rename(this,item.uri,filename);
+      if(!filename.equals(name(renamed))) {
+        try { FolderLibrary.rename(this,renamed,item.name); } catch(Exception ignored) {}
+        throw new IOException("文件提供方未按指定名称改名");
+      }
+      for(FolderLibrary.Item song:FolderLibrary.scan(this,item.folder)) {
+        if(LibraryNames.audioTitle(song.name).equalsIgnoreCase(title)) {
+          String source=song.audio.toString();
+          rememberAudio(source,song.name); libraryField(source,"lrc",text);
+          handler.post(()->{ if(sameSource(source,loadedSource)) setLrc(text); });
+        }
+      }
+      libraryWorkNote="已整理为 "+filename;
+    });
+  }
+
   void deleteEntry(String source,String title) {
     CheckBox removeFiles=new CheckBox(this); removeFiles.setText("同时删除源伴奏和配套 LRC 文件");
     new AlertDialog.Builder(this).setTitle("删除“"+title+"”？")

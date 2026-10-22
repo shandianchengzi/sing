@@ -12,6 +12,12 @@ final class LibraryNamesTest {
     for(String title:new String[]{"","../x","a/b","a\\b"," a","a\n","a:b"})
       if(LibraryNames.validTitle(title)) throw new AssertionError("unsafe title: "+title);
     if(!LibraryNames.validTitle("大梦归")||!LibraryNames.isAudio("test.aac")) throw new AssertionError();
+    java.util.Set<String> paired=new java.util.HashSet<>();
+    paired.add(LibraryNames.key("大梦归-伴奏.ogg"));
+    if(LibraryNames.needsLyricsOrganization("大梦归.lrc",paired)) throw new AssertionError("paired lyrics excluded");
+    for(String file:new String[]{"大梦归 - 周深.lrc","大梦归_伴奏.lrc","大梦归.LRC","月亮桥.lrc"})
+      if(!LibraryNames.needsLyricsOrganization(file,paired)) throw new AssertionError("needs organization: "+file);
+    if(LibraryNames.needsLyricsOrganization("song.txt",paired)) throw new AssertionError("only LRC files");
     System.out.println("LibraryNamesTest passed");
   }
 }

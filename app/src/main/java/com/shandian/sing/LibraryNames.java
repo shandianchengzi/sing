@@ -23,6 +23,10 @@ final class LibraryNames {
     if(!file.endsWith(".lrc")) return "";
     String s=stem(file); return validTitle(s)?s:"";
   }
+  static boolean needsLyricsOrganization(String file,java.util.Set<String> pairedTitles) {
+    return file.toLowerCase(Locale.ROOT).endsWith(".lrc")
+        && (key(file).isEmpty() || !pairedTitles.contains(key(file)));
+  }
   static String audioName(String title,String original) {
     if(!validTitle(title)||!isAudio(original)) throw new IllegalArgumentException("请输入有效歌名并选择支持的音频");
     return title+"-伴奏"+original.substring(original.lastIndexOf('.')).toLowerCase(Locale.ROOT);
