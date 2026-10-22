@@ -31,6 +31,21 @@ final class FolderLibrary {
     final String name;
     Entry(Uri uri, String name) { this.uri = uri; this.name = name; }
   }
+  /** Show all direct files, including LRC and files outside the library naming rules. */
+  static ArrayList<String> listFiles(Context ctx, Uri tree) throws IOException {
+    ArrayList<String> files=new ArrayList<>();
+    Uri children=DocumentsContract.buildChildDocumentsUriUsingTree(tree,DocumentsContract.getTreeDocumentId(tree));
+    try(Cursor c=ctx.getContentResolver().query(children,new String[]{
+        DocumentsContract.Document.COLUMN_DISPLAY_NAME,DocumentsContract.Document.COLUMN_MIME_TYPE},null,null,null)) {
+      if(c==null) throw new IOException("无法读取曲库文件夹");
+      while(c.moveToNext()) {
+        String name=c.getString(0);
+        if(name!=null && !DocumentsContract.Document.MIME_TYPE_DIR.equals(c.getString(1))) files.add(name);
+      }
+    } catch(Exception e) { throw new IOException("无法读取文件列表，请检查文件夹授权",e); }
+    files.sort(String.CASE_INSENSITIVE_ORDER);
+    return files;
+  }
   static ArrayList<Item> scan(Context ctx, Uri tree) throws IOException { return scan(ctx, tree, false); }
   static ArrayList<Item> scan(Context ctx, Uri tree, boolean unmatched) throws IOException {
     ArrayList<Entry> audio = new ArrayList<>(), lyrics = new ArrayList<>();

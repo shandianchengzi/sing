@@ -540,6 +540,12 @@ public class MainActivity extends Activity {
       TextView label = new TextView(this);
       label.setText((i == 0 ? "默认：" : (i + 1) + "：") + folderLabel(folder));
       row.addView(label, new LinearLayout.LayoutParams(0, -2, 1));
+      Button viewFiles = new Button(this);
+      viewFiles.setText("查看");
+      viewFiles.setMinWidth(0);
+      viewFiles.setMinimumWidth(0);
+      row.addView(viewFiles);
+      viewFiles.setOnClickListener(v -> showFolderFiles(folder));
       if (i > 0) {
         Button first = new Button(this);
         first.setText("设为默认");
@@ -918,15 +924,13 @@ public class MainActivity extends Activity {
       if (source.isEmpty() || !title.toLowerCase(java.util.Locale.ROOT).contains(filter)) continue;
       shown++;
       FolderLibrary.Item file = folderItem(source);
-      java.util.ArrayList<String> sources = groupedSources.get(songKey(item));
-      int copies = sources == null ? 1 : sources.size();
       LinearLayout entryRow = new LinearLayout(this);
       entryRow.setOrientation(LinearLayout.VERTICAL);
       parent.addView(entryRow);
       LinearLayout titleRow = new LinearLayout(this);
       entryRow.addView(titleRow);
       Button entry = new Button(this);
-      entry.setText(title + (copies > 1 ? "（" + copies + " 处）" : ""));
+      entry.setText(title);
       titleRow.addView(entry, new LinearLayout.LayoutParams(0, -2, 1));
       Button lyrics = new Button(this);
       lyrics.setText(item.optString("lrc").isEmpty() && pairedLyrics(source, file) == null ? "LRC" : "LRC ✓");
@@ -1252,6 +1256,20 @@ public class MainActivity extends Activity {
       });
     });
   }
+  void showFolderFiles(Uri folder) {
+    runLibraryWork("正在读取文件列表…",()->{
+      java.util.ArrayList<String> files=FolderLibrary.listFiles(this,folder);
+      handler.post(()->{
+        if(isDestroyed()) return;
+        AlertDialog.Builder dialog=new AlertDialog.Builder(this).setTitle(folderLabel(folder))
+            .setNegativeButton("返回",null);
+        if(files.isEmpty()) dialog.setMessage("文件夹中没有文件");
+        else dialog.setAdapter(new ArrayAdapter<>(this,android.R.layout.simple_list_item_1,files),null);
+        dialog.show();
+      });
+    });
+  }
+
   void scanUnmatched() {
     if(libraryFolders.isEmpty()) { message("请先选择曲库文件夹"); return; }
     runLibraryWork("正在扫描未规范命名的音频…",()->{
