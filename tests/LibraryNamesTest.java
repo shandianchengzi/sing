@@ -1,14 +1,17 @@
 package com.shandian.sing;
 final class LibraryNamesTest {
-  static void same(String a,String b) { if (!a.equals(b)) throw new AssertionError(a+" != "+b); }
+  static void same(String a,String b) { if(!a.equals(b)) throw new AssertionError(a+" != "+b); }
   public static void main(String[] args) {
-    same(LibraryNames.titleKey("大梦归 - 周深.lrc"),LibraryNames.key("大梦归_伴奏.ogg"));
-    same(LibraryNames.titleKey("月亮桥 - 周深.lrc"),LibraryNames.key("月亮桥_伴奏.wav"));
-    same(LibraryNames.key("Song (Instrumental).m4a"),"song");
-    same(LibraryNames.key("月亮桥_伴奏.wav"),LibraryNames.key("月亮桥_伴奏.mp3"));
-    same(LibraryNames.key("大梦归_伴奏.mp4"),LibraryNames.key("大梦归_伴奏.ogg"));
-    if (!LibraryNames.isAudio("test.aac") || LibraryNames.isAudio("test.lrc"))
-      throw new AssertionError("extensions");
+    same(LibraryNames.key("大梦归-伴奏.ogg"),LibraryNames.key("大梦归.lrc"));
+    same(LibraryNames.audioName("月亮桥","source.WAV"),"月亮桥-伴奏.wav");
+    same(LibraryNames.key("Song-伴奏.mp3"),LibraryNames.key("song.lrc"));
+    for(String name:new String[]{"大梦归_伴奏.ogg","Song (Instrumental).m4a","歌名.mp3","-伴奏.wav"," 歌名-伴奏.ogg"})
+      same(LibraryNames.key(name),"");
+    if(LibraryNames.key("大梦归 - 周深.lrc").equals(LibraryNames.key("大梦归-伴奏.ogg"))) throw new AssertionError("no fuzzy artist matching");
+    if(LibraryNames.key("A B-伴奏.ogg").equals(LibraryNames.key("AB.lrc"))) throw new AssertionError("preserve spaces");
+    for(String title:new String[]{"","../x","a/b","a\\b"," a","a\n","a:b"})
+      if(LibraryNames.validTitle(title)) throw new AssertionError("unsafe title: "+title);
+    if(!LibraryNames.validTitle("大梦归")||!LibraryNames.isAudio("test.aac")) throw new AssertionError();
     System.out.println("LibraryNamesTest passed");
   }
 }

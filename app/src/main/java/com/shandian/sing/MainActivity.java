@@ -30,7 +30,9 @@ public class MainActivity extends Activity {
   FrameLayout pages;
   View homePage, secondaryPage;
   TextView status, song, previous, current, next, clock;
-  Button record, preview, listen, export;
+  Button record, preview, listen, export, importLrcButton;
+  CheckBox importToLibrary;
+  String libraryWorkNote = "";
   SeekBar seek;
   EditText shift;
   MediaPlayer player;
@@ -111,13 +113,24 @@ public class MainActivity extends Activity {
         });
     status = text("戴耳机录制；从伴奏当前位置开始，可同步回听和导出混音。", 13);
     song = text("尚未选择伴奏", 15);
-    button("选择伴奏（含 OGG / MP4）", () -> pick(1, "*/*"));
+    LinearLayout backingRow=new LinearLayout(this); root.addView(backingRow);
+    Button choose=new Button(this); choose.setText("选择伴奏");
+    backingRow.addView(choose,new LinearLayout.LayoutParams(0,-2,1));
+    importToLibrary=new CheckBox(this); importToLibrary.setText("导入本地曲库");
+    importToLibrary.setChecked(preferences.getBoolean("import_to_library",true));
+    importToLibrary.setOnCheckedChangeListener((v,checked)->preferences.edit().putBoolean("import_to_library",checked).apply());
+    backingRow.addView(importToLibrary);
+    choose.setOnClickListener(v->{
+      if(importToLibrary.isChecked()&&libraryFolders.isEmpty()) { message("请先在本地曲库选择默认文件夹"); showLibrary(); }
+      else pick(1,"*/*");
+    });
     LinearLayout row = new LinearLayout(this);
     root.addView(row);
     Button local = new Button(this);
+    importLrcButton=local;
     local.setText("导入 LRC");
     row.addView(local, new LinearLayout.LayoutParams(0, -2, 1));
-    local.setOnClickListener(v -> pick(2, "*/*"));
+    local.setOnClickListener(v -> { if(loadedSource.isEmpty()) message("请先选择伴奏"); else pick(2, "*/*"); });
     Button online = new Button(this);
     online.setText("联网获取歌词");
     row.addView(online, new LinearLayout.LayoutParams(0, -2, 1));
@@ -350,28 +363,37 @@ public class MainActivity extends Activity {
 
   void rememberAudio(String source, String title) {
     if (source.isEmpty()) return;
+    FolderLibrary.Item actual=folderItem(source);
+    String filename=actual==null?title:actual.name;
+    String display=LibraryNames.audioTitle(filename);
+    if(display.isEmpty()) display=title;
     org.json.JSONArray list = library(), updated = new org.json.JSONArray();
     try {
       org.json.JSONObject selected = libraryItem(source);
       if (selected == null)
         selected =
-            new org.json.JSONObject().put("uri", source).put("title", title).put("filename", title);
-      if (!selected.has("filename")) selected.put("filename", title);
+            new org.json.JSONObject().put("uri", source).put("title", display).put("filename", filename);
+      if (!selected.has("filename")) selected.put("filename", filename);
       updated.put(selected);
       for (int i = 0; i < list.length(); i++) {
         org.json.JSONObject item = list.optJSONObject(i);
-        if (item != null && !source.equals(item.optString("uri"))) updated.put(item);
+        if (item != null && !sameSource(source,item.optString("uri"))) updated.put(item);
       }
       preferences.edit().putString("library", updated.toString()).apply();
     } catch (org.json.JSONException ignored) {
     }
   }
 
+  boolean sameSource(String first,String second) {
+    return first!=null && second!=null && !first.isEmpty() && !second.isEmpty()
+        && (first.equals(second) || FolderLibrary.sameDocument(Uri.parse(first),Uri.parse(second)));
+  }
+
   org.json.JSONObject libraryItem(String source) {
     org.json.JSONArray items = library();
     for (int i = 0; i < items.length(); i++) {
       org.json.JSONObject item = items.optJSONObject(i);
-      if (item != null && source.equals(item.optString("uri"))) return item;
+      if (item != null && sameSource(source,item.optString("uri"))) return item;
     }
     return null;
   }
@@ -380,7 +402,7 @@ public class MainActivity extends Activity {
     org.json.JSONArray items = library();
     for (int i = 0; i < items.length(); i++) {
       org.json.JSONObject item = items.optJSONObject(i);
-      if (item != null && source.equals(item.optString("uri"))) {
+      if (item != null && sameSource(source,item.optString("uri"))) {
         try {
           item.put(field, value);
         } catch (org.json.JSONException ignored) {
@@ -391,38 +413,62 @@ public class MainActivity extends Activity {
     }
   }
 
-  void renameEntry(String source, String title, Runnable refresh) {
-    EditText input = new EditText(this);
-    input.setSingleLine(true);
-    input.setText(title);
-    input.setSelectAllOnFocus(true);
-    AlertDialog dialog =
-        new AlertDialog.Builder(this)
-            .setTitle("改名（仅修改显示名称）")
-            .setView(input)
-            .setNegativeButton("取消", null)
-            .setPositiveButton("保存", null)
-            .create();
-    dialog.setOnShowListener(
-        d ->
-            dialog
-                .getButton(-1)
-                .setOnClickListener(
-                    v -> {
-                      String changed = input.getText().toString().trim();
-                      if (changed.isEmpty()) {
-                        input.setError("名称不能为空");
-                        return;
-                      }
-                      org.json.JSONObject previous = libraryItem(source);
-                      if (previous != null && !previous.has("filename"))
-                        libraryField(source, "filename", title);
-                      libraryField(source, "title", changed);
-                      if (source.equals(loadedSource)) song.setText(changed);
-                      dialog.dismiss();
-                      refresh.run();
-                    }));
-    dialog.show();
+  interface SongAction { void accept(String title); }
+  void askSong(String initial, SongAction action) {
+    EditText input=new EditText(this); input.setSingleLine(true); input.setText(initial);
+    AlertDialog dialog=new AlertDialog.Builder(this).setTitle("填写歌名")
+        .setMessage("伴奏保存为 歌名-伴奏.扩展名，歌词保存为 歌名.lrc")
+        .setView(input).setNegativeButton("取消",null).setPositiveButton("确定",null).create();
+    dialog.setOnShowListener(d->dialog.getButton(-1).setOnClickListener(v->{
+      String title=input.getText().toString().trim();
+      if(!LibraryNames.validTitle(title)) { input.setError("歌名不能为空，不能含路径或特殊文件名字符"); return; }
+      dialog.dismiss(); action.accept(title);
+    })); dialog.show();
+  }
+  void renameEntry(String source) {
+    FolderLibrary.Item item=folderItem(source);
+    if(item==null) { message("请先将文件整理到曲库文件夹"); return; }
+    askSong(LibraryNames.audioTitle(item.name),changed->{
+      if(changed.equals(LibraryNames.audioTitle(item.name))) return;
+      runLibraryWork("正在修改源文件名称…",()->{
+        for(FolderLibrary.Item candidate:FolderLibrary.scan(this,item.folder)) {
+          if(LibraryNames.audioTitle(candidate.name).equalsIgnoreCase(changed))
+            throw new IOException("曲库中已有同名歌曲");
+        }
+        String newName=LibraryNames.audioName(changed,item.name);
+        Uri collision=FolderLibrary.findFile(this,item.folder,changed+".lrc");
+        if(collision!=null && (item.lyrics==null || !FolderLibrary.sameDocument(collision,item.lyrics)))
+          throw new IOException("已有同名 LRC，请使用其他歌名");
+        Uri renamed=FolderLibrary.rename(this,item.audio,newName);
+        Uri renamedLyrics=item.lyrics;
+        try {
+          if(item.lyrics!=null) renamedLyrics=FolderLibrary.rename(this,item.lyrics,changed+".lrc");
+          persistMovedReferences(source,renamed.toString(),changed,newName,
+              renamedLyrics==null?null:FolderLibrary.readLrc(this,renamedLyrics));
+        } catch(Exception e) {
+          // Return files to their previous names before surfacing a failed transaction.
+          if(renamedLyrics!=null&&item.lyrics!=null) try { FolderLibrary.rename(this,renamedLyrics,LibraryNames.audioTitle(item.name)+".lrc"); } catch(Exception ignored) {}
+          try { FolderLibrary.rename(this,renamed,item.name); } catch(Exception ignored) {}
+          throw e;
+        }
+        if(sameSource(source,loadedSource)) { originalAudio=renamed.toString(); handler.post(()->{ returnHome(); importAudio(renamed,newName); }); }
+      });
+    });
+  }
+  interface LibraryWork { void run() throws Exception; }
+  void runLibraryWork(String progress,LibraryWork work) {
+    if(importingPair||!canNavigate()) return;
+    importingPair=true; libraryWorkNote=""; controls(); message(progress);
+    new Thread(()->{
+      Exception failure=null;
+      try { work.run(); } catch(Exception e) { failure=e; }
+      final Exception error=failure;
+      handler.post(()->{
+        importingPair=false; if(isDestroyed()) return;
+        controls(); if(secondaryPage!=null) showLibrary();
+        if(error!=null) error(error); else message(libraryWorkNote.isEmpty()?"曲库已更新":libraryWorkNote);
+      });
+    },"library-files").start();
   }
 
   void loadLibraryFolders() {
@@ -476,7 +522,7 @@ public class MainActivity extends Activity {
     if (!canNavigate()) return;
     LinearLayout content = subpage("本地曲库");
     TextView help = new TextView(this);
-    help.setText("可管理多个曲库文件夹。第一个是默认导入目标；自动读取每个文件夹的伴奏和配套 LRC。");
+    help.setText("可管理多个曲库文件夹。第一个是默认导入目标；只匹配“歌名-伴奏.扩展名”和“歌名.lrc”。旧文件请使用下方扫描整理。");
     content.addView(help);
     pageButton(content, "添加曲库文件夹", () -> chooseFolder());
     if (libraryFolders.isEmpty()) {
@@ -528,7 +574,8 @@ public class MainActivity extends Activity {
       if (libraryFolders.isEmpty()) message("请先添加至少一个曲库文件夹");
       else pick(7, "*/*");
     });
-    pageButton(content, "仅添加伴奏（不复制文件）", () -> pick(1, "*/*"));
+    pageButton(content, "添加单个伴奏", () -> { if(libraryFolders.isEmpty()) message("请先选择曲库文件夹"); else pick(9,"*/*"); });
+    pageButton(content, "扫描并整理未规范命名的音频", () -> scanUnmatched());
     EditText search = new EditText(this);
     search.setSingleLine(true);
     search.setHint("搜索所有曲库");
@@ -578,7 +625,7 @@ public class MainActivity extends Activity {
 
   FolderLibrary.Item folderItem(String source) {
     for (FolderLibrary.Item item : folderItems)
-      if (source.equals(item.audio.toString())) return item;
+      if (source.equals(item.audio.toString()) || FolderLibrary.sameDocument(Uri.parse(source),item.audio)) return item;
     return null;
   }
 
@@ -595,15 +642,18 @@ public class MainActivity extends Activity {
       if (record == null) {
         try {
           record = new org.json.JSONObject().put("uri", source)
-              .put("title", file.name).put("filename", file.name);
+              .put("title", LibraryNames.audioTitle(file.name)).put("filename", file.name);
         } catch (org.json.JSONException ignored) { continue; }
       }
-      addGrouped(groups, record);
+      try { record.put("title",LibraryNames.audioTitle(file.name)).put("filename",file.name); }
+      catch(org.json.JSONException ignored) {}
+      if(!preferences.getBoolean("hidden:"+source,false)) addGrouped(groups, record);
     }
-    // Standalone imports or old saved songs stay visible without a selected folder.
+    // Only canonical filenames can participate in the library, including saved entries.
     for (int i = 0; i < stored.length(); i++) {
       org.json.JSONObject row = stored.optJSONObject(i);
-      if (row != null) addGrouped(groups, row);
+      if (row != null && !LibraryNames.audioTitle(row.optString("filename")).isEmpty()
+          && !preferences.getBoolean("hidden:"+row.optString("uri"),false)) addGrouped(groups, row);
     }
     org.json.JSONArray result = new org.json.JSONArray();
     for (org.json.JSONObject row : groups.values()) result.put(row);
@@ -627,7 +677,9 @@ public class MainActivity extends Activity {
       sources = new java.util.ArrayList<>();
       groupedSources.put(key, sources);
     }
-    if (!sources.contains(source)) sources.add(source);
+    boolean duplicate=false;
+    for(String existing:sources) if(sameSource(existing,source)) { duplicate=true; break; }
+    if(!duplicate) sources.add(source);
     org.json.JSONObject representative = groups.get(key);
     if (representative == null) groups.put(key, row);
     else if (representative.optString("lrc").isEmpty() && !row.optString("lrc").isEmpty()) {
@@ -676,6 +728,7 @@ public class MainActivity extends Activity {
   }
 
   void selectLibraryAudio(String source, String title, FolderLibrary.Item file) {
+    if(!canNavigate()) return;
     final int version = ++folderOpenId;
     final Uri pairing = pairedLyrics(source, file);
     if (pairing == null) {
@@ -747,7 +800,7 @@ public class MainActivity extends Activity {
     final String storedLrc = saved == null ? "" : saved.optString("lrc");
     final String actualName = LibraryNames.isAudio(filename) ? filename : name(sourceAudio);
     if (!LibraryNames.isAudio(actualName)) { message("无法确认伴奏文件名，操作已取消"); return; }
-    final boolean wasLoaded = source.equals(loadedSource);
+    final boolean wasLoaded = sameSource(source,loadedSource);
     if (wasLoaded && !copyOnly) {
       stopVoice();
       releasePlayer();
@@ -765,8 +818,7 @@ public class MainActivity extends Activity {
           lyricsText = FolderLibrary.readLrc(getApplicationContext(), oldLyrics);
           if (new Lrc(lyricsText).lines.isEmpty()) throw new IOException("原始 LRC 无有效时间戳");
         }
-        String lyricsFileName = oldLyrics != null ? name(oldLyrics)
-            : lyricsText.isEmpty() ? null : LibraryNames.stem(actualName) + ".lrc";
+        String lyricsFileName = oldLyrics != null || !lyricsText.isEmpty() ? LibraryNames.audioTitle(actualName)+".lrc" : null;
         FolderLibrary.Imported copied = FolderLibrary.copyPair(
             getApplicationContext(), targetFolder, sourceAudio, actualName,
             oldLyrics, lyricsFileName, oldLyrics == null ? lyricsText : null);
@@ -796,7 +848,8 @@ public class MainActivity extends Activity {
           return;
         }
         if (copyOnly) {
-          rememberAudio(destination.toString(), title);
+          rememberAudio(destination.toString(), actualName);
+          libraryField(destination.toString(),"title",title);
           if (!finalLyrics.isEmpty()) libraryField(destination.toString(), "lrc", finalLyrics);
         } else if (wasLoaded) {
           originalAudio = destination.toString();
@@ -820,7 +873,7 @@ public class MainActivity extends Activity {
         File sidecar = new File(voice.getPath() + ".json");
         if (!sidecar.isFile()) continue;
         TakeInfo info = TakeInfo.read(voice, "");
-        if (oldSource.equals(info.source))
+        if (sameSource(oldSource,info.source))
           new TakeInfo(info.startMs, newSource, false).save(voice);
       }
     }
@@ -828,7 +881,7 @@ public class MainActivity extends Activity {
     org.json.JSONObject replacement = null;
     for (int i = 0; i < existing.length(); i++) {
       org.json.JSONObject row = existing.optJSONObject(i);
-      if (row != null && oldSource.equals(row.optString("uri"))) {
+      if (row != null && sameSource(oldSource,row.optString("uri"))) {
         replacement = new org.json.JSONObject(row.toString());
         break;
       }
@@ -837,16 +890,17 @@ public class MainActivity extends Activity {
       replacement = new org.json.JSONObject().put("title", title).put("filename", filename);
     replacement.put("uri", newSource);
     replacement.put("filename", filename);
-    if (!lyrics.isEmpty()) replacement.put("lrc", lyrics);
+    replacement.put("title",title);
+    if (lyrics!=null && !lyrics.isEmpty()) replacement.put("lrc", lyrics);
     changed.put(replacement);
     for (int i = 0; i < existing.length(); i++) {
       org.json.JSONObject row = existing.optJSONObject(i);
-      if (row != null && !oldSource.equals(row.optString("uri"))
-          && !newSource.equals(row.optString("uri"))) changed.put(row);
+      if (row != null && !sameSource(oldSource,row.optString("uri"))
+          && !sameSource(newSource,row.optString("uri"))) changed.put(row);
     }
     android.content.SharedPreferences.Editor update =
         preferences.edit().putString("library", changed.toString());
-    if (oldSource.equals(preferences.getString("audio", "")))
+    if (sameSource(oldSource,preferences.getString("audio", "")))
       update.putString("audio", newSource);
     if (!update.commit()) throw new IOException("曲库引用保存失败，原文件保留");
   }
@@ -876,56 +930,18 @@ public class MainActivity extends Activity {
       Button lyrics = new Button(this);
       lyrics.setText(item.optString("lrc").isEmpty() && pairedLyrics(source, file) == null ? "LRC" : "LRC ✓");
       titleRow.addView(lyrics);
-      LinearLayout actionsRow = new LinearLayout(this);
-      entryRow.addView(actionsRow);
-      lyrics.setOnClickListener(
-          v -> {
-            if (libraryItem(source) == null) rememberAudio(source, title);
-             preferences.edit().putString("pending_lrc_source", source).apply();
-            pick(5, "*/*");
-          });
-      Button relocate = new Button(this);
-      relocate.setText("整理到");
-      actionsRow.addView(relocate, new LinearLayout.LayoutParams(0, -2, 1));
-      relocate.setEnabled(!scanningFolders);
-      relocate.setOnClickListener(v ->
-          chooseSongSource(source, chosenSource ->
-              chooseTargetFolder("选择目标曲库（按复选框复制或移动）", target ->
-                  relocateLibraryItem(chosenSource, title,
-                      filenameFor(chosenSource, item.optString("filename", title)),
-                      folderItem(chosenSource), target))));
-      Button rename = new Button(this);
-      rename.setText("改名");
-      actionsRow.addView(rename, new LinearLayout.LayoutParams(0, -2, 1));
-      rename.setOnClickListener(
-          v -> {
-            if (libraryItem(source) == null) rememberAudio(source, title);
-            renameEntry(source, title, () -> renderLibrary(parent, query));
-          });
+      lyrics.setOnClickListener(v->chooseSongSource(source,chosen->lyricsOptions(chosen)));
+      Button edit=new Button(this); edit.setText("编辑"); titleRow.addView(edit);
+      edit.setEnabled(!scanningFolders && !importingPair);
+      edit.setOnClickListener(v->chooseSongSource(source,chosen->
+          new AlertDialog.Builder(this).setTitle(title).setItems(new String[]{"整理到","改名","删除"},(d,which)->{
+            if(which==0) chooseTargetFolder("选择目标曲库",target->relocateLibraryItem(chosen,title,
+                filenameFor(chosen,item.optString("filename",title)),folderItem(chosen),target));
+            else if(which==1) renameEntry(chosen);
+            else deleteEntry(chosen,title);
+          }).show()));
       entry.setOnClickListener(v -> selectLibraryAudio(source, title, file));
-      entry.setOnLongClickListener(
-          v -> {
-            if (file != null || copies > 1) { message("使用「整理到」复制或移动文件；不同位置的副本会合并显示"); return true; }
-            new AlertDialog.Builder(this)
-                .setTitle("从曲库移除？")
-                .setMessage(title + "\n只移除记录，不删除原文件。")
-                .setNegativeButton("取消", null)
-                .setPositiveButton(
-                    "移除",
-                    (d, which) -> {
-                      org.json.JSONArray current = library(), kept = new org.json.JSONArray();
-                      for (int j = 0; j < current.length(); j++) {
-                        org.json.JSONObject row = current.optJSONObject(j);
-                        if (row != null && !source.equals(row.optString("uri"))) kept.put(row);
-                      }
-                      preferences.edit().putString("library", kept.toString()).apply();
-                      if (source.equals(preferences.getString("audio", "")))
-                        preferences.edit().remove("audio").apply();
-                      renderLibrary(parent, query);
-                    })
-                .show();
-            return true;
-          });
+      entry.setOnLongClickListener(v->{ chooseSongSource(source,chosen->deleteEntry(chosen,title)); return true; });
     }
     if (shown == 0) {
       TextView empty = new TextView(this);
@@ -969,7 +985,7 @@ public class MainActivity extends Activity {
             : ready ? player.getCurrentPosition() : 0;
     String source = replayInfo == null ? loadedSource : replayInfo.source;
     stopVoice();
-    if (!source.isEmpty() && (!ready || !source.equals(loadedSource))) {
+    if (!source.isEmpty() && (!ready || !sameSource(source,loadedSource))) {
       originalAudio = source;
       Uri uri = Uri.parse(source);
       importAudio(uri, name(uri));
@@ -1020,9 +1036,11 @@ public class MainActivity extends Activity {
             ? "取消准备回听"
             : replay != null && replay.playing ? "暂停回听" : "回听最近录音 / 继续");
     export.setEnabled(!busy && take != null);
+    importLrcButton.setEnabled(!loadedSource.isEmpty() && !busy);
   }
 
   void pick(int code, String type) {
+    if(code==2 && loadedSource.isEmpty()) { message("请先选择伴奏"); return; }
     if (starting || previewSeeking || exporting || importingPair) {
       message("请等待当前操作完成");
       return;
@@ -1037,7 +1055,7 @@ public class MainActivity extends Activity {
     }
     Intent intent =
         new Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType(type);
-    if (code == 1 || code == 4 || code == 7)
+    if (code == 1 || code == 4 || code == 7 || code == 9)
       intent.putExtra(
           Intent.EXTRA_MIME_TYPES,
           new String[] {
@@ -1081,60 +1099,26 @@ public class MainActivity extends Activity {
       } else if (code == 7) {
         saveGrant(uri, data.getFlags());
         pendingPairAudio = uri;
-        pendingPairName = name(uri);
-        pick(8, "*/*");
+        askSong("",title->{ pendingPairName=title; resolveSong(title,()->pick(8,"*/*")); });
       } else if (code == 8) {
         saveGrant(uri, data.getFlags());
-        chooseTargetFolder("选择伴奏＋LRC 的目标曲库", destination ->
-            addPair(uri, name(uri), destination));
-      } else if (code == 1) {
-        try {
-          saveGrant(uri, data.getFlags());
-          originalAudio = uri.toString();
-        } catch (SecurityException e) {
-          originalAudio = "";
-        }
-        preferences.edit().putString("audio", originalAudio).apply();
-        importAudio(uri, name(uri));
-      } else if (code == 2 || code == 5) {
-        requestVersion++;
-        byte[] bytes;
-        try (InputStream in = getContentResolver().openInputStream(uri);
-            ByteArrayOutputStream out = new ByteArrayOutputStream()) {
-          byte[] b = new byte[4096];
-          int n;
-          while ((n = in.read(b)) != -1) {
-            if (out.size() + n > 2 * 1024 * 1024) throw new IOException("歌词文件大于 2MB");
-            out.write(b, 0, n);
-          }
-          bytes = out.toByteArray();
-        }
-        String s;
-        if (bytes.length >= 2
-            && ((bytes[0] & 255) == 255 && (bytes[1] & 255) == 254
-                || (bytes[0] & 255) == 254 && (bytes[1] & 255) == 255))
-          s = new String(bytes, "UTF-16");
+        if(libraryFolders.isEmpty()) throw new IOException("请先选择曲库文件夹");
+        addPair(uri, pendingPairName+".lrc", libraryFolders.get(0));
+      } else if (code == 1 || code == 9) {
+        saveGrant(uri,data.getFlags());
+        if(code==9 || importToLibrary.isChecked()) askSong("",title->{
+          resolveSong(title,()->importSingle(uri,title,code==1 || !preferences.getBoolean("copy_instead_of_move",false),null));
+        });
         else {
-          try {
-            s =
-                StandardCharsets.UTF_8
-                    .newDecoder()
-                    .decode(java.nio.ByteBuffer.wrap(bytes))
-                    .toString();
-          } catch (CharacterCodingException e) {
-            s = new String(bytes, "GB18030");
-          }
+          originalAudio=uri.toString(); preferences.edit().putString("audio",originalAudio).apply();
+          importAudio(uri,name(uri));
         }
-        if (code == 5) {
-          String target = preferences.getString("pending_lrc_source", "");
-          preferences.edit().remove("pending_lrc_source").apply();
-          if (new Lrc(s).lines.isEmpty()) throw new IOException("请选择带时间戳的标准 LRC");
-          if (libraryItem(target) == null) throw new IOException("该曲库条目已不存在");
-          libraryField(target, "lrc", s);
-          if (target.equals(loadedSource)) setLrc(s);
-          if (secondaryPage != null) showLibrary();
-          Toast.makeText(this, "已配套 LRC", Toast.LENGTH_SHORT).show();
-        } else setLrc(s);
+      } else if (code == 2 || code == 5) {
+        if(code==2 && loadedSource.isEmpty()) throw new IOException("请先选择伴奏");
+        saveGrant(uri,data.getFlags());
+        String target=code==5?preferences.getString("pending_lrc_source",""):loadedSource;
+        preferences.edit().remove("pending_lrc_source").apply();
+        attachLyrics(target,uri,null);
       } else if (code == 4) {
         returnHome();
         startSeparation(uri, name(uri));
@@ -1156,7 +1140,8 @@ public class MainActivity extends Activity {
   void addPair(Uri lrcUri, String lrcName, Uri destination) {
     if (pendingPairAudio == null || importingPair) return;
     final Uri input = pendingPairAudio, folder = destination;
-    final String filename = pendingPairName;
+    final String title = pendingPairName;
+    final String filename = LibraryNames.audioName(title,name(input));
     final boolean copy = preferences.getBoolean("copy_instead_of_move", false);
     pendingPairAudio = null; pendingPairName = null;
     if (folder == null) { message("请先选择曲库文件夹"); return; }
@@ -1190,7 +1175,9 @@ public class MainActivity extends Activity {
         importingPair = false;
         if (error != null) { message("添加失败，原文件保留：" + error.getMessage()); return; }
         String source = loaded.toString();
+        folderItems.add(new FolderLibrary.Item(folder,loaded,filename,null));
         rememberAudio(source, filename);
+        libraryField(source,"title",title);
         libraryField(source, "lrc", text);
         originalAudio = source;
         preferences.edit().putString("audio", source).apply();
@@ -1199,6 +1186,139 @@ public class MainActivity extends Activity {
         if (secondaryPage != null) showLibrary();
       });
     }, "pair-import").start();
+  }
+
+  void resolveSong(String title,Runnable importNew) {
+    if(!canNavigate()) return;
+    importingPair=true; controls(); message("正在查找曲库中的同名歌曲…");
+    java.util.ArrayList<Uri> folders=new java.util.ArrayList<>(libraryFolders);
+    new Thread(()->{
+      FolderLibrary.Item existing=null; Exception failure=null;
+      try {
+        outer: for(Uri folder:folders) for(FolderLibrary.Item item:FolderLibrary.scan(this,folder)) {
+          if(LibraryNames.audioTitle(item.name).equalsIgnoreCase(title)) { existing=item; break outer; }
+        }
+      } catch(Exception e) { failure=e; }
+      final FolderLibrary.Item found=existing; final Exception error=failure;
+      handler.post(()->{
+        importingPair=false; if(isDestroyed()) return; controls();
+        if(error!=null) { error(error); return; }
+        if(found==null) { importNew.run(); return; }
+        folderItems.add(found);
+        preferences.edit().remove("hidden:"+found.audio).apply();
+        pendingPairAudio=null; pendingPairName=null;
+        selectLibraryAudio(found.audio.toString(),title,found);
+      });
+    },"library-lookup").start();
+  }
+  void importSingle(Uri input,String title,boolean move,Uri explicitFolder) {
+    if(libraryFolders.isEmpty()) { message("请先选择曲库文件夹"); return; }
+    Uri folder=explicitFolder==null?libraryFolders.get(0):explicitFolder;
+    runLibraryWork(move?"正在移动伴奏…":"正在复制伴奏…",()->{
+      String filename=LibraryNames.audioName(title,name(input));
+      FolderLibrary.Imported result;
+      if(explicitFolder!=null) {
+        // A scanned file is already in this folder: rename without copying its audio bytes.
+        String oldName=name(input);
+        Uri renamed=FolderLibrary.rename(this,input,filename);
+        try { persistMovedReferences(input.toString(),renamed.toString(),title,filename,null); }
+        catch(Exception e) { try { FolderLibrary.rename(this,renamed,oldName); } catch(Exception ignored) {} throw e; }
+        result=new FolderLibrary.Imported(renamed,null,"");
+      } else {
+        result=FolderLibrary.copyPair(this,folder,input,filename,null,null,null);
+        if(move) persistMovedReferences(input.toString(),result.audio.toString(),title,filename,null);
+        else { rememberAudio(result.audio.toString(),filename); libraryField(result.audio.toString(),"title",title); }
+        if(move) {
+          String warning=FolderLibrary.deleteSources(this,input,null,result.audio,null);
+          if(!warning.isEmpty()) libraryWorkNote=warning;
+        }
+      }
+      preferences.edit().remove("hidden:"+result.audio).commit();
+      FolderLibrary.Item matched=new FolderLibrary.Item(folder,result.audio,filename,null);
+      for(FolderLibrary.Item candidate:FolderLibrary.scan(this,folder)) {
+        if(FolderLibrary.sameDocument(candidate.audio,result.audio)) { matched=candidate; break; }
+      }
+      if(matched.lyrics!=null) {
+        String text=FolderLibrary.readLrc(this,matched.lyrics);
+        if(!new Lrc(text).lines.isEmpty()) libraryField(result.audio.toString(),"lrc",text);
+      }
+      final FolderLibrary.Item imported=matched;
+      handler.post(()->{
+        folderItems.add(imported);
+        originalAudio=imported.audio.toString();
+        preferences.edit().putString("audio",originalAudio).apply();
+        returnHome(); importAudio(imported.audio,filename);
+      });
+    });
+  }
+  void scanUnmatched() {
+    if(libraryFolders.isEmpty()) { message("请先选择曲库文件夹"); return; }
+    runLibraryWork("正在扫描未规范命名的音频…",()->{
+      java.util.ArrayList<FolderLibrary.Item> unmatched=new java.util.ArrayList<>();
+      for(Uri folder:libraryFolders) unmatched.addAll(FolderLibrary.scan(this,folder,true));
+      handler.post(()->{
+        if(unmatched.isEmpty()) { message("没有未规范命名的音频"); return; }
+        String[] labels=new String[unmatched.size()];
+        for(int i=0;i<labels.length;i++) labels[i]=unmatched.get(i).name+"（"+folderLabel(unmatched.get(i).folder)+"）";
+        new AlertDialog.Builder(this).setTitle("选择音频并填写歌名（原文件改名）")
+            .setItems(labels,(d,index)->{
+              FolderLibrary.Item item=unmatched.get(index);
+              askSong("",title->{ resolveSong(title,()->importSingle(item.audio,title,true,item.folder)); });
+            }).setNegativeButton("返回",null).show();
+      });
+    });
+  }
+  void deleteEntry(String source,String title) {
+    CheckBox removeFiles=new CheckBox(this); removeFiles.setText("同时删除源伴奏和配套 LRC 文件");
+    new AlertDialog.Builder(this).setTitle("删除“"+title+"”？")
+        .setMessage("不勾选只从曲库隐藏；勾选后源文件无法恢复。多位置副本只处理刚选择的位置。")
+        .setView(removeFiles).setNegativeButton("取消",null).setPositiveButton("删除",(d,w)->{
+          FolderLibrary.Item item=folderItem(source);
+          runLibraryWork("正在删除…",()->{
+            if(removeFiles.isChecked()) {
+              FolderLibrary.remove(this,Uri.parse(source));
+              if(item!=null && item.lyrics!=null) {
+                try { FolderLibrary.remove(this,item.lyrics); }
+                catch(IOException e) { libraryWorkNote="伴奏已删除，LRC 删除失败："+e.getMessage(); }
+              }
+            }
+            org.json.JSONArray kept=new org.json.JSONArray(),rows=library();
+            for(int i=0;i<rows.length();i++) {
+              org.json.JSONObject row=rows.optJSONObject(i);
+              if(row!=null&&!sameSource(source,row.optString("uri"))) kept.put(row);
+            }
+            preferences.edit().putString("library",kept.toString()).putBoolean("hidden:"+source,true).commit();
+            handler.post(()->{
+              if(sameSource(source,loadedSource)) {
+                releasePlayer(); loadedSource=""; originalAudio=""; ready=false;
+                preferences.edit().remove("audio").remove("lrc").apply();
+                lrc=new Lrc(""); song.setText("尚未选择伴奏"); controls();
+              }
+            });
+          });
+        }).show();
+  }
+  void lyricsOptions(String source) {
+    if(!canNavigate()) return;
+    if(libraryItem(source)==null) rememberAudio(source,filenameFor(source,"伴奏"));
+    new AlertDialog.Builder(this).setTitle("配套 LRC").setItems(new String[]{"本地","联网（网易云）"},(d,which)->{
+      if(which==0) { preferences.edit().putString("pending_lrc_source",source).apply(); pick(5,"*/*"); }
+      else lyricsDialog(source);
+    }).show();
+  }
+  void attachLyrics(String source,Uri input,String generated) {
+    runLibraryWork("正在保存配套 LRC…",()->{
+      FolderLibrary.Item item=null;
+      outer: for(Uri folder:libraryFolders) for(FolderLibrary.Item candidate:FolderLibrary.scan(this,folder)) {
+        if(FolderLibrary.sameDocument(candidate.audio,Uri.parse(source))) { item=candidate; break outer; }
+      }
+      String text=input==null?generated:FolderLibrary.readLrc(this,input);
+      if(text==null||new Lrc(text).lines.isEmpty()) throw new IOException("请选择带时间戳的标准 LRC");
+      if(item!=null) FolderLibrary.saveLyrics(this,item.folder,LibraryNames.audioTitle(item.name),text);
+      else if(libraryItem(source)==null) rememberAudio(source,name(Uri.parse(source)));
+      libraryField(source,"lrc",text);
+      handler.post(()->{ if(sameSource(source,loadedSource)) setLrc(text); });
+    });
   }
 
   void separationSettings() {
@@ -1477,7 +1597,9 @@ public class MainActivity extends Activity {
     message("已载入 " + lrc.lines.size() + " 行歌词；正数偏移让歌词延后。");
   }
 
-  void lyricsDialog() {
+  void lyricsDialog() { lyricsDialog(loadedSource); }
+  void lyricsDialog(String target) {
+    if(target==null || target.isEmpty()) { message("请先选择伴奏"); return; }
     if (recording || starting || exporting) return;
     EditText input = new EditText(this);
     input.setHint("网易云歌曲 ID 或含 id= 的歌曲链接");
@@ -1503,7 +1625,7 @@ public class MainActivity extends Activity {
                           String lyrics = LyricsApi.fetch(id);
                           handler.post(
                               () -> {
-                                if (version == requestVersion && !isDestroyed()) setLrc(lyrics);
+                                if (version == requestVersion && !isDestroyed()) attachLyrics(target,null,lyrics);
                               });
                         } catch (Exception e) {
                           handler.post(

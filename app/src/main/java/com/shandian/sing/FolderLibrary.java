@@ -31,7 +31,8 @@ final class FolderLibrary {
     final String name;
     Entry(Uri uri, String name) { this.uri = uri; this.name = name; }
   }
-  static ArrayList<Item> scan(Context ctx, Uri tree) throws IOException {
+  static ArrayList<Item> scan(Context ctx, Uri tree) throws IOException { return scan(ctx, tree, false); }
+  static ArrayList<Item> scan(Context ctx, Uri tree, boolean unmatched) throws IOException {
     ArrayList<Entry> audio = new ArrayList<>(), lyrics = new ArrayList<>();
     Uri children = DocumentsContract.buildChildDocumentsUriUsingTree(
         tree, DocumentsContract.getTreeDocumentId(tree));
@@ -44,23 +45,58 @@ final class FolderLibrary {
         String id = c.getString(0), name = c.getString(1), mime = c.getString(2);
         if (name == null || DocumentsContract.Document.MIME_TYPE_DIR.equals(mime)) continue;
         Entry e = new Entry(DocumentsContract.buildDocumentUriUsingTree(tree, id), name);
-        if (name.toLowerCase(Locale.ROOT).endsWith(".lrc")) lyrics.add(e);
-        else if (LibraryNames.isAudio(name)) audio.add(e);
+        if (!LibraryNames.lyricsTitle(name).isEmpty()) lyrics.add(e);
+        else if (LibraryNames.isAudio(name)
+            && (unmatched == LibraryNames.audioTitle(name).isEmpty())) audio.add(e);
       }
     } catch (Exception e) { throw new IOException("无法扫描已授权的曲库文件夹", e); }
-    Map<String, List<Uri>> exact = new HashMap<>(), byTitle = new HashMap<>();
+    Map<String, List<Uri>> exact = new HashMap<>();
     for (Entry e : lyrics) {
       exact.computeIfAbsent(LibraryNames.key(e.name), k -> new ArrayList<>()).add(e.uri);
-      byTitle.computeIfAbsent(LibraryNames.titleKey(e.name), k -> new ArrayList<>()).add(e.uri);
     }
     ArrayList<Item> files = new ArrayList<>();
     for (Entry e : audio) {
       List<Uri> found = exact.get(LibraryNames.key(e.name));
-      if (found == null || found.size() != 1) found = byTitle.get(LibraryNames.titleKey(e.name));
+
       files.add(new Item(tree, e.uri, e.name, found != null && found.size() == 1 ? found.get(0) : null));
     }
     files.sort((a,b) -> a.name.compareToIgnoreCase(b.name));
     return files;
+  }
+  static Uri rename(Context ctx, Uri source, String filename) throws IOException {
+    try {
+      try(Cursor c=ctx.getContentResolver().query(source,new String[]{DocumentsContract.Document.COLUMN_DISPLAY_NAME},null,null,null)) {
+        if(c!=null && c.moveToFirst() && filename.equals(c.getString(0))) return source;
+      }
+      Uri renamed=DocumentsContract.renameDocument(ctx.getContentResolver(), source, filename);
+      if(renamed==null) throw new IOException("文件提供方不支持改名");
+      return renamed;
+    } catch(Exception e) { throw new IOException("无法改名："+e.getMessage(),e); }
+  }
+  static void remove(Context ctx, Uri source) throws IOException {
+    try {
+      if(!DocumentsContract.deleteDocument(ctx.getContentResolver(),source)) throw new IOException("文件未删除");
+    } catch(Exception e) { throw new IOException("无法删除源文件："+e.getMessage(),e); }
+  }
+  static Uri saveLyrics(Context ctx, Uri folder, String title, String text) throws IOException {
+    if(!LibraryNames.validTitle(title)) throw new IOException("歌名无效");
+    Uri parent=DocumentsContract.buildDocumentUriUsingTree(folder,DocumentsContract.getTreeDocumentId(folder));
+    Uri previous=findFile(ctx,folder,title+".lrc");
+    Uri temporary=null;
+    try {
+      temporary=DocumentsContract.createDocument(ctx.getContentResolver(),parent,"application/octet-stream",
+          ".sing-lyrics-"+java.util.UUID.randomUUID()+".tmp");
+      if(temporary==null) throw new IOException("无法创建歌词文件");
+      writeVerified(ctx.getContentResolver(),text,temporary);
+      if(previous!=null) {
+        // Back up the old lyrics until the replacement has been verified and renamed.
+        Uri backup=rename(ctx,previous,".sing-backup-"+java.util.UUID.randomUUID()+".lrc");
+        try { temporary=rename(ctx,temporary,title+".lrc"); }
+        catch(IOException e) { rename(ctx,backup,title+".lrc"); throw e; }
+        try { remove(ctx,backup); } catch(IOException ignored) {}
+      } else temporary=rename(ctx,temporary,title+".lrc");
+      Uri result=temporary; temporary=null; return result;
+    } finally { if(temporary!=null) try { remove(ctx,temporary); } catch(IOException ignored) {} }
   }
   static String readLrc(Context ctx, Uri uri) throws IOException {
     byte[] bytes;
@@ -85,7 +121,7 @@ final class FolderLibrary {
   /** Reuse exact duplicates; never overwrite a different file sharing the same name. */
   static Imported copyPair(Context ctx, Uri tree, Uri sourceAudio, String audioName,
       Uri sourceLrc, String lrcName, String generatedLrc) throws IOException {
-    if (!LibraryNames.isAudio(audioName)) throw new IOException("不是支持的伴奏文件");
+    if (LibraryNames.audioTitle(audioName).isEmpty()) throw new IOException("伴奏必须命名为 歌名-伴奏.扩展名");
     if ((sourceLrc != null || generatedLrc != null)
         && (lrcName == null || !lrcName.toLowerCase(Locale.ROOT).endsWith(".lrc")))
       throw new IOException("歌词文件必须是 .lrc");
@@ -104,12 +140,14 @@ final class FolderLibrary {
             resolver, parent, mime(resolver, sourceAudio, audioName), audioName);
         if (targetAudio == null) throw new IOException("无法创建目标伴奏");
         createdAudio = true;
+        targetAudio = rename(ctx,targetAudio,audioName);
         copyVerified(resolver, sourceAudio, targetAudio);
       }
       if (lrcName != null && targetLrc == null) {
-        targetLrc = DocumentsContract.createDocument(resolver, parent, "text/plain", lrcName);
+        targetLrc = DocumentsContract.createDocument(resolver, parent, "application/octet-stream", lrcName);
         if (targetLrc == null) throw new IOException("无法创建目标歌词");
         createdLrc = true;
+        targetLrc = rename(ctx,targetLrc,lrcName);
         if (sourceLrc != null) copyVerified(resolver, sourceLrc, targetLrc);
         else writeVerified(resolver, generatedLrc, targetLrc);
       }
@@ -158,7 +196,7 @@ final class FolderLibrary {
     } catch (RuntimeException ignored) { return false; }
   }
 
-  private static Uri findFile(Context ctx, Uri tree, String name) throws IOException {
+  static Uri findFile(Context ctx, Uri tree, String name) throws IOException {
     Uri children = DocumentsContract.buildChildDocumentsUriUsingTree(
         tree, DocumentsContract.getTreeDocumentId(tree));
     try (Cursor c = ctx.getContentResolver().query(children, new String[]{
