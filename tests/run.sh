@@ -6,6 +6,8 @@ javac -encoding UTF-8 -d build/tests app/src/main/java/com/shandian/sing/Lrc.jav
 java -cp build/tests com.shandian.sing.LrcTest
 javac -encoding UTF-8 -d build/tests app/src/main/java/com/shandian/sing/LibraryNames.java tests/LibraryNamesTest.java
 java -cp build/tests com.shandian.sing.LibraryNamesTest
+javac -encoding UTF-8 -d build/tests app/src/main/java/com/shandian/sing/LibraryNames.java app/src/main/java/com/shandian/sing/RecordingNames.java tests/RecordingNamesTest.java
+java -cp build/tests com.shandian.sing.RecordingNamesTest
 
 SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
 : "${SDK:?Set ANDROID_HOME for audio tests}"

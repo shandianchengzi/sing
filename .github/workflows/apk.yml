@@ -47,7 +47,7 @@ jobs:
           SIGNING_KEYSTORE: build/fixed.jks
           SIGNING_PASSWORD: ${{ secrets.SING_KEYSTORE_PASSWORD || 'android' }}
           VERSION_CODE: ${{ github.run_number }}
-          VERSION_NAME: 1.9.${{ github.run_number }}
+          VERSION_NAME: 2.0.${{ github.run_number }}
         run: |
           export VERSION_CODE=$((VERSION_CODE + 1000))
           bash build.sh
@@ -74,4 +74,4 @@ jobs:
           gh release upload preview build/sing.apk build/sing-[0-9]*.apk build/sing-server.zip --clobber
           # Publish metadata last; existing manifests keep pointing to immutable versioned APKs.
           gh release upload preview build/update.json --clobber
-          gh release edit preview --title '轻唱 · 最新测试版' --notes '移除百度网盘，支持本地文件夹曲库、自动匹配 LRC、成对添加并可选移动文件（默认开启）。固定签名覆盖安装保留数据。'
+          gh release edit preview --title '轻唱 · 最新测试版' --notes '多曲库文件夹、同名歌曲去重展示，新增复制或移动（默认移动）、已有歌曲整理、录音删除和曲库名加时间戳自动命名，并修复刚加载伴奏时从头录音卡住。沿用原签名，覆盖安装保留数据。'
