@@ -426,22 +426,23 @@ public class MainActivity extends Activity {
     })); dialog.show();
   }
   void renameEntry(String source) {
-    FolderLibrary.Item item=folderItem(source);
-    if(item==null) { message("请先将文件整理到曲库文件夹"); return; }
+    FolderLibrary.Item known=folderItem(source);
+    final FolderLibrary.Item item=known!=null?known:new FolderLibrary.Item(null,Uri.parse(source),filenameFor(source,name(Uri.parse(source))),null);
     askSong(LibraryNames.audioTitle(item.name),changed->{
       if(changed.equals(LibraryNames.audioTitle(item.name))) return;
       runLibraryWork("正在修改源文件名称…",()->{
-        for(FolderLibrary.Item candidate:FolderLibrary.scan(this,item.folder)) {
+        for(FolderLibrary.Item candidate:item.folder==null?new java.util.ArrayList<FolderLibrary.Item>():FolderLibrary.scan(this,item.folder)) {
           if(LibraryNames.audioTitle(candidate.name).equalsIgnoreCase(changed))
             throw new IOException("曲库中已有同名歌曲");
         }
         String newName=LibraryNames.audioName(changed,item.name);
-        Uri collision=FolderLibrary.findFile(this,item.folder,changed+".lrc");
+        Uri collision=item.folder==null?null:FolderLibrary.findFile(this,item.folder,changed+".lrc");
         if(collision!=null && (item.lyrics==null || !FolderLibrary.sameDocument(collision,item.lyrics)))
           throw new IOException("已有同名 LRC，请使用其他歌名");
         Uri renamed=FolderLibrary.rename(this,item.audio,newName);
         Uri renamedLyrics=item.lyrics;
         try {
+          if(!newName.equals(name(renamed))) throw new IOException("文件提供方未按指定名称改名");
           if(item.lyrics!=null) renamedLyrics=FolderLibrary.rename(this,item.lyrics,changed+".lrc");
           persistMovedReferences(source,renamed.toString(),changed,newName,
               renamedLyrics==null?null:FolderLibrary.readLrc(this,renamedLyrics));
@@ -821,7 +822,7 @@ public class MainActivity extends Activity {
         String lyricsFileName = oldLyrics != null || !lyricsText.isEmpty() ? LibraryNames.audioTitle(actualName)+".lrc" : null;
         FolderLibrary.Imported copied = FolderLibrary.copyPair(
             getApplicationContext(), targetFolder, sourceAudio, actualName,
-            oldLyrics, lyricsFileName, oldLyrics == null ? lyricsText : null);
+            oldLyrics, lyricsFileName, oldLyrics == null && !lyricsText.isEmpty() ? lyricsText : null);
         targetUri = copied.audio;
         note = copied.warning;
         String destinationSource = copied.audio.toString();
@@ -1290,7 +1291,7 @@ public class MainActivity extends Activity {
             preferences.edit().putString("library",kept.toString()).putBoolean("hidden:"+source,true).commit();
             handler.post(()->{
               if(sameSource(source,loadedSource)) {
-                releasePlayer(); loadedSource=""; originalAudio=""; ready=false;
+                stopVoice(); releasePlayer(); loadedSource=""; originalAudio=""; ready=false;
                 preferences.edit().remove("audio").remove("lrc").apply();
                 lrc=new Lrc(""); song.setText("尚未选择伴奏"); controls();
               }
@@ -1315,7 +1316,14 @@ public class MainActivity extends Activity {
       String text=input==null?generated:FolderLibrary.readLrc(this,input);
       if(text==null||new Lrc(text).lines.isEmpty()) throw new IOException("请选择带时间戳的标准 LRC");
       if(item!=null) FolderLibrary.saveLyrics(this,item.folder,LibraryNames.audioTitle(item.name),text);
-      else if(libraryItem(source)==null) rememberAudio(source,name(Uri.parse(source)));
+      else {
+        String title=LibraryNames.audioTitle(filenameFor(source,name(Uri.parse(source))));
+        if(!title.isEmpty()) {
+          if(libraryFolders.isEmpty()) throw new IOException("请先选择曲库文件夹，以便保存配套 LRC");
+          FolderLibrary.saveLyrics(this,libraryFolders.get(0),title,text);
+        }
+        if(libraryItem(source)==null) rememberAudio(source,name(Uri.parse(source)));
+      }
       libraryField(source,"lrc",text);
       handler.post(()->{ if(sameSource(source,loadedSource)) setLrc(text); });
     });
