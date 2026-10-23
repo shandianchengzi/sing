@@ -90,6 +90,7 @@ jobs:
             build/mobile-model/assets/spleeter-2stems-fp32.json
             build/mobile-model/verification.json
             build/android-tests/result.txt
+            build/android-tests/update-result.txt
             build/sing-[0-9]*.apk
             build/update.json
             build/sing-server.zip
@@ -99,7 +100,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release view preview >/dev/null 2>&1 || gh release create preview --prerelease --title '轻唱 · 最新测试版' --notes '原生轻量 Android APK；人声单独保存。自动构建，真机兼容性请实测。沿用固定签名，可覆盖安装保留数据。'
-          gh release upload preview build/sing.apk build/sing-offline.apk build/sing-[0-9]*.apk build/sing-server.zip build/mobile-model/assets/spleeter-2stems-fp32.tflite build/mobile-model/assets/spleeter-2stems-fp32.json build/mobile-model/verification.json --clobber
+          gh release upload preview build/sing.apk build/sing-offline.apk build/sing-[0-9]*.apk build/sing-server.zip build/mobile-model/spleeter-2stems-fp32-*.tflite build/mobile-model/assets/spleeter-2stems-fp32.json build/mobile-model/verification.json --clobber
           # Publish metadata last; existing manifests keep pointing to immutable versioned APKs.
           gh release upload preview build/update.json --clobber
           gh release edit preview --title '轻唱 · 手机本地伴奏提取' --notes '新增更多→手机本地提取伴奏。使用与 vocal-separate 相同的原 Spleeter 两轨 FP32 权重，支持 MP3/AAC/M4A/WAV，歌曲无需上传或电脑。普通 sing.apk 首次下载约 75 MB 模型，sing-offline.apk 内含模型可离线安装；以后应用内更新仅下载程序，保留模型、录音和曲库。分离完成自动载入录歌。固定签名覆盖安装。已通过原模型数值回归和 Android 模拟器测试，vivo X100 速度和听感待真机验证。'

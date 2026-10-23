@@ -10,16 +10,34 @@ import java.security.MessageDigest;
 /** Versioned original-weight model; installed once, independent of APK updates. */
 final class SpleeterModel {
   static final String ID = "spleeter-2stems-fp32-v1";
-  static final String SHA = "4eb7713aa9b13906c5e8918c61a2d4bf2d667d4bfd0cda6501cb7c4aed915b68";
   static final long BYTES = 78607648;
-  static final String URL = "https://github.com/shandianchengzi/sing/releases/download/preview/spleeter-2stems-fp32.tflite";
+  static String expected(Context c) throws Exception {
+    try (InputStream in=c.getAssets().open("spleeter-2stems-fp32.json");
+         ByteArrayOutputStream bytes=new ByteArrayOutputStream()) {
+      byte[] buffer=new byte[4096];int n;
+      while((n=in.read(buffer))!=-1) {
+        if(bytes.size()+n>16384)throw new IOException("模型信息异常");
+        bytes.write(buffer,0,n);
+      }
+      org.json.JSONObject metadata=new org.json.JSONObject(new String(bytes.toByteArray(),java.nio.charset.StandardCharsets.UTF_8));
+      String sha=metadata.getString("sha256");
+      if(!ID.equals(metadata.getString("id"))||metadata.getLong("bytes")!=BYTES||!sha.matches("[0-9a-f]{64}"))
+        throw new IOException("模型信息不兼容");
+      return sha;
+    }
+  }
   static File file(Context c) { return new File(c.getFilesDir(), ID + ".tflite"); }
   static boolean installed(Context c) { return file(c).length() == BYTES; }
   static void ensure(Context c, LocalSeparation.Task task, SeparationClient.Progress progress) throws Exception {
     File target = file(c);
+    String expected=expected(c);
+    android.content.SharedPreferences saved=c.getSharedPreferences("models",Context.MODE_PRIVATE);
     if (installed(c)) {
       progress.update("正在校验原两轨模型…");
-      if (SHA.equals(digest(target, task))) return;
+      String trusted=saved.getString(ID+".sha256",expected);
+      if (trusted.equals(digest(target, task))) {
+        saved.edit().putString(ID+".sha256",trusted).commit(); return;
+      }
       throw new IOException("本地模型校验失败，请在本地分离设置中重新安装模型");
     }
     File temp = new File(c.getFilesDir(), ID + ".part");
@@ -31,7 +49,8 @@ final class SpleeterModel {
       try { stream = c.getAssets().open("spleeter-2stems-fp32.tflite"); }
       catch (FileNotFoundException missing) {
         progress.update("正在下载原两轨模型（约 75 MB，仅首次需要）…");
-        connection = open(URL, task); stream = connection.getInputStream();
+        String url="https://github.com/shandianchengzi/sing/releases/download/preview/spleeter-2stems-fp32-"+expected+".tflite";
+        connection = open(url, task); stream = connection.getInputStream();
       }
       try (InputStream input = stream;
            OutputStream output = new BufferedOutputStream(new FileOutputStream(temp))) {
@@ -46,8 +65,9 @@ final class SpleeterModel {
         if (copied != BYTES) throw new IOException("模型下载不完整，请重试");
       } finally { if (connection != null) connection.disconnect(); task.connection = null; }
       task.check();
-      if (!SHA.equals(digest(temp, task))) throw new IOException("模型 SHA-256 校验失败，请重试");
+      if (!expected.equals(digest(temp, task))) throw new IOException("模型 SHA-256 校验失败，请重试");
       if (!temp.renameTo(target)) throw new IOException("无法保存模型");
+      saved.edit().putString(ID+".sha256",expected).commit();
       success = true;
     } finally { if (!success) temp.delete(); }
   }

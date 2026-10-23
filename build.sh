@@ -20,8 +20,12 @@ rm -rf build/classes/* build/dex/*
 version_args=(--replace-version)
 if [[ -n "${VERSION_CODE:-}" ]]; then version_args+=(--version-code "$VERSION_CODE"); fi
 if [[ -n "${VERSION_NAME:-}" ]]; then version_args+=(--version-name "$VERSION_NAME"); fi
-asset_args=()
-if [[ -n "${OFFLINE_ASSETS:-}" ]]; then asset_args+=(-A "$OFFLINE_ASSETS"); fi
+asset_directory="${OFFLINE_ASSETS:-build/mobile-model/info}"
+if [[ ! -f "$asset_directory/spleeter-2stems-fp32.json" ]]; then
+  echo 'Missing verified model metadata. Run python scripts/mobile-model/prepare_model.py first.' >&2
+  exit 1
+fi
+asset_args=(-A "$asset_directory")
 "$BT/aapt2" link -o build/base.apk -I "$API" --manifest app/src/main/AndroidManifest.xml "${version_args[@]}" "${asset_args[@]}" build/resources.zip
 javac -encoding UTF-8 -source 8 -target 8 -bootclasspath "$API:$BT/core-lambda-stubs.jar" -classpath "$TF_JARS" -d build/classes app/src/main/java/com/shandian/sing/*.java
 find build/classes -name '*.class' > build/classes.list
