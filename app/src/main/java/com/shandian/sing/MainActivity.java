@@ -58,6 +58,11 @@ public class MainActivity extends Activity {
   android.content.SharedPreferences preferences;
   boolean recording, ready, dragging, separating;
   SeparationClient.Task separationTask;
+  ProgressDialog localProgress;
+  long localHandled;
+  final Runnable localTick = new Runnable() {
+    public void run() { refreshLocalSeparation(); handler.postDelayed(this, 500); }
+  };
   final Handler handler = new Handler();
   final Runnable tick =
       new Runnable() {
@@ -89,6 +94,7 @@ public class MainActivity extends Activity {
   public void onCreate(Bundle state) {
     super.onCreate(state);
     preferences = getSharedPreferences("session", MODE_PRIVATE);
+    localHandled = preferences.getLong("local_separation_handled", 0);
     loadLibraryFolders();
     updater =
         new AppUpdater(
@@ -291,6 +297,8 @@ public class MainActivity extends Activity {
   void showMore() {
     if (!canNavigate()) return;
     LinearLayout content = subpage("更多");
+    pageButton(content, "手机本地提取伴奏", () -> chooseLocalSeparation());
+    pageButton(content, "本地分离模型", () -> localModelSettings());
     pageButton(
         content,
         "上传歌曲去人声",
@@ -1124,6 +1132,9 @@ public class MainActivity extends Activity {
         String target=code==5?preferences.getString("pending_lrc_source",""):loadedSource;
         preferences.edit().remove("pending_lrc_source").apply();
         attachLyrics(target,uri,null);
+      } else if (code == 10) {
+        saveGrant(uri, data.getFlags());
+        askSong("", title -> { returnHome(); startLocalSeparation(uri, title); });
       } else if (code == 4) {
         returnHome();
         startSeparation(uri, name(uri));
@@ -1485,6 +1496,76 @@ public class MainActivity extends Activity {
     dialog.show();
   }
 
+  void chooseLocalSeparation() {
+    if (!canNavigate()) return;
+    if (SpleeterModel.installed(this)) { pick(10, "*/*"); return; }
+    new AlertDialog.Builder(this).setTitle("手机本地提取伴奏")
+      .setMessage("使用与电脑版相同的 Spleeter 两轨权重。首次安装模型约 75 MB，之后可离线提取；歌曲不会上传。支持 MP3、AAC、M4A、WAV 等系统可解码音频，也可选择视频音轨。")
+      .setPositiveButton("选择歌曲", (d,w)->pick(10,"*/*"))
+      .setNegativeButton("取消",null).show();
+  }
+
+  void localModelSettings() {
+    if (!canNavigate()) return;
+    new AlertDialog.Builder(this).setTitle("原 Spleeter 两轨模型")
+      .setMessage((SpleeterModel.installed(this)?"已安装，可离线使用。":"首次提取时安装，约 75 MB。")
+          + "\nFP32 原权重，无量化。模型独立保存，更新应用无需重新下载模型。\n若网络下载失败，可从项目发布页安装完整离线版。")
+      .setPositiveButton("确定",null)
+      .setNeutralButton("重新安装",(d,w)->{
+        if (SpleeterModel.file(this).exists() && !SpleeterModel.file(this).delete()) message("无法删除模型，请重试");
+        else message("下次本地提取时将重新安装模型");
+      }).show();
+  }
+
+  void startLocalSeparation(Uri source, String title) {
+    if (recording || starting || separating || exporting || importingPair) return;
+    stopVoice(); if (ready) player.pause();
+    if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission("android.permission.POST_NOTIFICATIONS") != PackageManager.PERMISSION_GRANTED)
+      requestPermissions(new String[]{"android.permission.POST_NOTIFICATIONS"}, 31);
+    Intent job = new Intent(this, LocalSeparationService.class)
+        .putExtra("source", source.toString()).putExtra("title", title);
+    try {
+      startForegroundService(job);
+      separating=true; controls();
+    } catch (RuntimeException e) { error(e); }
+  }
+
+  void refreshLocalSeparation() {
+    LocalSeparationService.State job=LocalSeparationService.restored(this);
+    if (job==null || job.id==localHandled) return;
+    if (job.running) {
+      separating=true;
+      if (localProgress==null) {
+        localProgress=new ProgressDialog(this);
+        localProgress.setTitle("手机本地提取伴奏");
+        localProgress.setCancelable(false);
+        localProgress.setButton(-2,"取消",(d,w)->{});
+        localProgress.show();
+        localProgress.getButton(-2).setOnClickListener(v->{
+          startService(new Intent(this,LocalSeparationService.class).setAction(LocalSeparationService.CANCEL));
+          localProgress.getButton(-2).setEnabled(false);
+          localProgress.setMessage("正在取消，请等待当前分区结束…");
+        });
+        controls();
+      }
+      localProgress.setMessage(job.text);
+    } else {
+      localHandled=job.id; preferences.edit().putLong("local_separation_handled",localHandled).apply(); separating=false;
+      if(localProgress!=null) { localProgress.dismiss(); localProgress=null; }
+      controls();
+      if (job.result!=null && job.result.isFile()) {
+        originalAudio=Uri.fromFile(job.result).toString();
+        preferences.edit().putString("audio",originalAudio).apply();
+        importAudio(Uri.fromFile(job.result),job.title+"-伴奏");
+        message("伴奏已保存，可以开始录歌；可在本地曲库中整理");
+      } else if (job.error!=null && !job.cancelled) message(job.error);
+    }
+  }
+
+  @Override protected void onStart() {
+    super.onStart();
+    handler.post(localTick);
+  }
   void startSeparation(Uri uri, String title) {
     if (recording || starting || separating || exporting) return;
     String base = preferences.getString("server", "");
@@ -2129,6 +2210,8 @@ public class MainActivity extends Activity {
 
   @Override
   protected void onStop() {
+    handler.removeCallbacks(localTick);
+    if(localProgress!=null) { localProgress.dismiss(); localProgress=null; }
     super.onStop();
     afterAudioReady = null;
     previewSeeking = false;

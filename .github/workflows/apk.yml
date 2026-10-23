@@ -1,7 +1,7 @@
 name: Build APK
 on:
   push:
-    branches: [main]
+    branches: [main, feature/android-local-spleeter]
     paths-ignore: ['README.md', 'docs/**', 'desktop/**', '.github/workflows/desktop.yml']
   workflow_dispatch:
 permissions:
@@ -25,11 +25,17 @@ jobs:
       - run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: '3.12'
       - name: Test self-hosted API protocol
         run: |
-          python -m pip install -r requirements-build.txt fastapi==0.115.6 httpx==0.28.1
+          python -m pip install -r requirements-build.txt fastapi==0.115.6 httpx==0.28.1 tensorflow-cpu==2.16.2
           python server/test_api.py
+      - name: Install audio fixture encoder
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
+      - name: Convert and numerically verify original Spleeter model
+        run: |
+          python scripts/mobile-model/prepare_model.py
+          python scripts/mobile-model/make_android_fixtures.py
       - run: bash tests/run.sh
       - name: Restore fixed signing key
         env:
@@ -47,10 +53,26 @@ jobs:
           SIGNING_KEYSTORE: build/fixed.jks
           SIGNING_PASSWORD: ${{ secrets.SING_KEYSTORE_PASSWORD || 'android' }}
           VERSION_CODE: ${{ github.run_number }}
-          VERSION_NAME: 2.0.${{ github.run_number }}
+          VERSION_NAME: 2.1.${{ github.run_number }}
         run: |
           export VERSION_CODE=$((VERSION_CODE + 1000))
+          OFFLINE_ASSETS=build/mobile-model/assets bash build.sh
+          mv build/sing.apk build/sing-offline.apk
           bash build.sh
+          bash tests/android/build.sh
+      - name: Enable emulator acceleration
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Android real codec and model smoke test
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          target: default
+          disable-animations: true
+          script: bash tests/android/run.sh
       - name: Remove signing key
         if: always()
         run: rm -f build/fixed.jks
@@ -63,15 +85,22 @@ jobs:
           name: sing-apk
           path: |
             build/sing.apk
+            build/sing-offline.apk
+            build/mobile-model/assets/spleeter-2stems-fp32.tflite
+            build/mobile-model/assets/spleeter-2stems-fp32.json
+            build/mobile-model/verification.json
+            build/android-tests/result.txt
+            build/android-tests/update-result.txt
             build/sing-[0-9]*.apk
             build/update.json
             build/sing-server.zip
       - name: Publish development APK
+        if: github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release view preview >/dev/null 2>&1 || gh release create preview --prerelease --title '轻唱 · 最新测试版' --notes '原生轻量 Android APK；人声单独保存。自动构建，真机兼容性请实测。沿用固定签名，可覆盖安装保留数据。'
-          gh release upload preview build/sing.apk build/sing-[0-9]*.apk build/sing-server.zip --clobber
+          gh release upload preview build/sing.apk build/sing-offline.apk build/sing-[0-9]*.apk build/sing-server.zip build/mobile-model/spleeter-2stems-fp32-*.tflite build/mobile-model/assets/spleeter-2stems-fp32.json build/mobile-model/verification.json --clobber
           # Publish metadata last; existing manifests keep pointing to immutable versioned APKs.
           gh release upload preview build/update.json --clobber
-          gh release edit preview --title '轻唱 · 最新测试版' --notes '多曲库文件夹、同名歌曲去重展示，新增复制或移动（默认移动）、已有歌曲整理、录音删除和曲库名加时间戳自动命名，并修复刚加载伴奏时从头录音卡住。沿用原签名，覆盖安装保留数据。'
+          gh release edit preview --title '轻唱 · 手机本地伴奏提取' --notes '新增更多→手机本地提取伴奏。使用与 vocal-separate 相同的原 Spleeter 两轨 FP32 权重，支持 MP3/AAC/M4A/WAV，歌曲无需上传或电脑。普通 sing.apk 首次下载约 75 MB 模型，sing-offline.apk 内含模型可离线安装；以后应用内更新仅下载程序，保留模型、录音和曲库。分离完成自动载入录歌。固定签名覆盖安装。已通过原模型数值回归和 Android 模拟器测试，vivo X100 速度和听感待真机验证。'
