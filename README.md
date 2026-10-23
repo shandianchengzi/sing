@@ -4,6 +4,12 @@
 
 [下载最新测试版 APK](https://github.com/shandianchengzi/sing/releases/download/preview/sing.apk) · [仓库内 APK](https://github.com/shandianchengzi/sing/raw/refs/heads/main/apk/sing.apk) · [自动构建](https://github.com/shandianchengzi/sing/actions)
 
+## Windows 桌面版
+
+提供适合电脑横屏的原生桌面版：左侧曲库、中间歌词与录音控制、右侧历史录音，支持曲库整理、录音、同步回听、混音与双轨导出、自部署去人声和应用内检查更新。
+
+[下载 Windows 便携版](https://github.com/shandianchengzi/sing/releases/download/desktop-preview/sing-desktop-windows-x64.zip) · [桌面版说明与源码构建](desktop/README.md)
+
 ## 使用
 
 1. 选择手机上的伴奏（系统支持的 MP3/M4A/WAV/OGG（Vorbis、Opus）等音频格式，或 MP4 视频）。

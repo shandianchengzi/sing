@@ -8,3 +8,6 @@
 /server/.env
 /server/data/
 **/__pycache__/
+
+/desktop/.pytest_cache/
+/.pytest_cache/

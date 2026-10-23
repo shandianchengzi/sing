@@ -2,7 +2,7 @@ name: Build APK
 on:
   push:
     branches: [main]
-    paths-ignore: ['README.md', 'docs/**']
+    paths-ignore: ['README.md', 'docs/**', 'desktop/**', '.github/workflows/desktop.yml']
   workflow_dispatch:
 permissions:
   contents: write

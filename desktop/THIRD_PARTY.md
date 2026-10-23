@@ -1,0 +1,16 @@
+# Third-party components
+
+Project-owned code: Copyright © 2026 shandianchengzi; see LICENSE. Third-party components retain their licenses; the commercial restriction in the project's LICENSE does not replace their licenses.
+
+- **PySide6 / Shiboken6 / Qt 6.10.3**, The Qt Company and contributors. Used under LGPL-3.0; Qt Widgets/Core/Gui shared libraries remain separate and replaceable in `_internal`. License texts: `dependency-licenses/LGPL-3.0.txt` and `GPL-3.0.txt`. Sources and build instructions: https://code.qt.io/cgit/pyside/pyside-setup.git/tag/?h=v6.10.3 and https://code.qt.io/cgit/qt/qtbase.git/tag/?h=v6.10.3 ; https://doc.qt.io/qtforpython-6/building_from_source/index.html . This package does not use GPL-only Qt modules. Users may replace or modify these libraries and debug those modifications under the library's license.
+- **NumPy**, NumPy developers, BSD-3-Clause; https://github.com/numpy/numpy . See bundled wheel notices for BLAS/LAPACK and runtime libraries.
+- **python-sounddevice / PortAudio**, Matthias Geier / PortAudio contributors, MIT; https://github.com/spatialaudio/python-sounddevice and https://github.com/PortAudio/portaudio . PortAudio shared libraries remain separate.
+- **SoundFile / libsndfile**, SoundFile contributors, BSD-3-Clause / libsndfile contributors, LGPL-2.1; https://github.com/bastibe/python-soundfile and https://github.com/libsndfile/libsndfile . The libsndfile shared library remains replaceable in `_internal`.
+- **Requests**, Kenneth Reitz and contributors, Apache-2.0; https://github.com/psf/requests . urllib3 (MIT), certifi (MPL-2.0), charset-normalizer (MIT), idna (BSD-3-Clause) retain their notices.
+- **cryptography**, Python Cryptographic Authority and contributors, Apache-2.0 OR BSD-3-Clause; https://github.com/pyca/cryptography . Bundled OpenSSL notices accompany the wheel.
+- **imageio-ffmpeg**, ImageIO contributors, BSD-2-Clause; https://github.com/imageio/imageio-ffmpeg . Bundles an unmodified FFmpeg executable run as a separate subprocess. FFmpeg and enabled codecs are governed by their own GPL/LGPL licenses. Run the bundled executable with `-version` / `-L` for its exact build and licensing. Binary distribution and source/build provenance: https://github.com/imageio/imageio-binaries/tree/master/ffmpeg ; FFmpeg source: https://ffmpeg.org/download.html . GPL-3.0 text is included.
+- **PyInstaller**, PyInstaller contributors, GPL-2.0 with bootloader exception; https://pyinstaller.org/en/stable/license.html . The exception permits distribution of application bundles under the application's license.
+- **CPython**, Python Software Foundation; https://www.python.org/downloads/source/ . Runtime licenses are retained by PyInstaller.
+- **NetEase lyric request adapter** is adapted from jitwxs/163MusicLyrics, Apache-2.0. See NOTICE and the complete Apache-2.0 license bundled with this program.
+
+The `dependency-licenses` folder includes notices extracted from the exact wheels used by the build and `packages.json` with package versions. `sing-desktop-source.zip` accompanies each binary release with the application source and pinned dependency versions. Installing a replacement compatible Qt/libsndfile/PortAudio shared library does not require an application signing key.
