@@ -9,25 +9,32 @@ from pathlib import Path
 import struct
 import sys
 import zipfile
+import zlib
 
 import zopfli.zlib
 
 
-def pack(base, dex, target):
+def pack(base, dex, target, native_dir=None):
     with zipfile.ZipFile(base) as source:
         entries = [(i.filename, source.read(i), i.compress_type) for i in source.infolist()]
     entries.append(("classes.dex", Path(dex).read_bytes(), zipfile.ZIP_DEFLATED))
+    if native_dir:
+        for library in sorted(Path(native_dir).rglob("*.so")):
+            entries.append(("lib/" + library.relative_to(native_dir).as_posix(), library.read_bytes(), zipfile.ZIP_DEFLATED))
     if len({name for name, _, _ in entries}) != len(entries):
         raise ValueError("Duplicate APK entries")
     directory = bytearray()
     with open(target, "wb") as output:
         for name, data, method in entries:
-            if len(data) > 32 * 1024 * 1024:
-                raise ValueError("APK entry exceeds lightweight packer's 32 MB limit")
+            if len(data) > 128 * 1024 * 1024:
+                raise ValueError("APK entry exceeds lightweight packer's 128 MB limit")
             name_bytes = name.encode("utf-8")
             if method not in (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED):
                 raise ValueError("Unsupported ZIP compression method")
-            payload = zopfli.zlib.compress(data, numiterations=15)[2:-4] if method == 8 else data
+            payload = data
+            if method == 8:
+                payload = (zlib.compress(data, level=9) if len(data) > 1024 * 1024
+                           else zopfli.zlib.compress(data, numiterations=15))[2:-4]
             crc = binascii.crc32(data) & 0xffffffff
             offset = output.tell()
             # Fixed DOS timestamp: 1980-01-01. No ZIP64 or data descriptors needed.

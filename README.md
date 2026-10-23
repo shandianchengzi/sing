@@ -109,3 +109,7 @@ Copyright © 2026 shandianchengzi。
 本项目源码公开，当前许可证不是 OSI 批准的开源许可证。此前按 Apache-2.0 等许可证授予的旧版本权利不追溯撤销；第三方部分继续遵循原许可。归属见 [NOTICE](NOTICE)，Apache-2.0 原文保留在 [licenses/Apache-2.0.txt](licenses/Apache-2.0.txt)，应用内“更多 → 关于 → 许可证与第三方声明”可离线查看许可全文。音乐、伴奏、歌词及模型的权利与软件授权分开。
 
 OGG 伴奏可直接在手机播放，文件选择器同时识别 audio/* 和 application/ogg 类型，无需转换或上传服务器。
+
+## 手机本地提取伴奏
+
+新增「更多 → 手机本地提取伴奏」，使用原 Spleeter 两轨 FP32 权重，支持 MP3/AAC/M4A/WAV 等格式。首次安装约 75 MB 模型后可离线使用，无需电脑或服务器；完成后直接载入录歌。模型与程序独立更新。详见 [实现与验证](docs/android-local-separation.md)。

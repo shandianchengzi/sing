@@ -8,3 +8,11 @@ Sing application updates: Copyright (c) 2026 shandianchengzi.
 Project-owned code is offered under LICENSE from the licensing-change version onward.
 The Apache-2.0 terms for third-party and previously licensed portions remain applicable.
 Full Apache-2.0 text: licenses/Apache-2.0.txt; also bundled in the APK's license viewer.
+
+Local accompaniment extraction uses the original Deezer Spleeter 2stems weights
+https://github.com/deezer/spleeter (MIT; licenses/Spleeter-MIT.txt).
+The model is converted to FP32 TensorFlow Lite without retraining/quantization.
+The GPL vocal-separate Windows wrapper and third-party Android port code are not
+included in Sing. Android audio decoding and STFT integration are implemented here.
+TensorFlow Lite 2.16.1: https://github.com/tensorflow/tensorflow (Apache-2.0).
+Third-party models/runtime keep their own licenses, independent of Sing LICENSE.
