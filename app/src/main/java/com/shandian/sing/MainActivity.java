@@ -1531,7 +1531,7 @@ public class MainActivity extends Activity {
   }
 
   void refreshLocalSeparation() {
-    LocalSeparationService.State job=LocalSeparationService.state;
+    LocalSeparationService.State job=LocalSeparationService.restored(this);
     if (job==null || job.id==localHandled) return;
     if (job.running) {
       separating=true;

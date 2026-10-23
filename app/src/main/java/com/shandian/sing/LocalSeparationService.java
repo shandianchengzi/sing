@@ -12,12 +12,13 @@ public final class LocalSeparationService extends Service {
   static final String CANCEL = "com.shandian.sing.CANCEL_LOCAL_SEPARATION";
   static final int NOTIFICATION = 421;
   static final class State {
-    final long id = System.currentTimeMillis();
+    final long id;
     final String title;
     volatile boolean running = true, cancelled;
     volatile String text = "准备本地分离…", error;
     volatile File result;
-    State(String title) { this.title=title; }
+    State(String title) { this(title, System.currentTimeMillis()); }
+    State(String title, long id) { this.title=title; this.id=id; }
   }
   static volatile State state;
   LocalSeparation.Task task;
@@ -25,6 +26,20 @@ public final class LocalSeparationService extends Service {
   long lastNotification;
 
   static boolean running() { State s=state; return s!=null && s.running; }
+  static State restored(Context context) {
+    if (state!=null) return state;
+    android.content.SharedPreferences saved=context.getSharedPreferences("session",MODE_PRIVATE);
+    long id=saved.getLong("local_result_id",0);
+    if(id==0) return null;
+    State result=new State(saved.getString("local_result_title","歌曲"),id);
+    result.running=false;
+    result.cancelled=saved.getBoolean("local_result_cancelled",false);
+    String path=saved.getString("local_result_file","");
+    if(!path.isEmpty()) result.result=new File(path);
+    String error=saved.getString("local_result_error","");
+    if(!error.isEmpty()) result.error=error;
+    return result;
+  }
   @Override public IBinder onBind(Intent intent) { return null; }
   @Override public void onCreate() {
     super.onCreate();
@@ -74,6 +89,11 @@ public final class LocalSeparationService extends Service {
       } catch (OutOfMemoryError e) {
         job.error="本地分离内存不足，请关闭其他大型应用后重试"; job.text=job.error;
       } finally {
+        getSharedPreferences("session",MODE_PRIVATE).edit()
+          .putLong("local_result_id",job.id).putString("local_result_title",job.title)
+          .putString("local_result_file",job.result==null?"":job.result.getAbsolutePath())
+          .putString("local_result_error",job.error==null?"":job.error)
+          .putBoolean("local_result_cancelled",job.cancelled).commit();
         job.running=false;
         if(wake!=null && wake.isHeld()) wake.release();
         stopForeground(STOP_FOREGROUND_REMOVE);

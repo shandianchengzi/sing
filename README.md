@@ -1,6 +1,6 @@
 # 轻唱 Sing
 
-原生 Android 轻量录歌工具，Java + 系统 API，无第三方运行库、无 FFmpeg、无 WebView。安装包约 58 KB（实际大小见构建日志）。Android 8.0 及以上。
+原生 Android 录歌工具，Java + 系统音频 API + TensorFlow Lite 本地分离，无内嵌 FFmpeg、无 WebView。普通 APK 仅包含程序与推理运行库，约 75 MB 原模型独立安装；也提供内含模型的完整离线 APK。实际大小见构建日志。Android 8.0 及以上，支持 arm64-v8a 与 x86_64。
 
 [下载最新测试版 APK](https://github.com/shandianchengzi/sing/releases/download/preview/sing.apk) · [仓库内 APK](https://github.com/shandianchengzi/sing/raw/refs/heads/main/apk/sing.apk) · [自动构建](https://github.com/shandianchengzi/sing/actions)
 
@@ -45,7 +45,7 @@
 
 ## 更多
 
-主页最底部“更多”进入独立页面，包含“上传歌曲去人声”“去人声服务设置”和“关于”。“关于”列出作者 shandianchengzi、版权与许可、项目仓库及第三方归属。主页不显示应用标题，操作状态显示在最顶部。点击“返回”或系统返回键回到主页。
+主页最底部“更多”进入独立页面，包含“手机本地提取伴奏”“本地分离模型”“上传歌曲去人声”“去人声服务设置”和“关于”。“关于”列出作者 shandianchengzi、版权与许可、项目仓库及第三方归属。主页不显示应用标题，操作状态显示在最顶部。点击“返回”或系统返回键回到主页。
 
 ## 应用内更新（v1.6）
 
@@ -59,7 +59,7 @@
 
 ## 自部署去人声（v1.3）
 
-无需第三方付费 API。电脑上运行本仓库的 Demucs 服务，手机填地址和令牌，直接上传原曲（也支持 MP4），自动下载伴奏并用于录歌。APK 不包含模型，仍然只有几十 KB。相同文件生成的伴奏会缓存到手机，下次无需重新上传。
+无需第三方付费 API。电脑上运行本仓库的 Demucs 服务，手机填地址和令牌，直接上传原曲（也支持 MP4），自动下载伴奏并用于录歌。这是可选的外部服务入口；日常手机独立使用可改选“手机本地提取伴奏”，无需部署服务。相同文件生成的伴奏会缓存到手机，下次无需重新上传。
 
 [查看部署说明](server/README.md) · [下载自部署服务包](https://github.com/shandianchengzi/sing/releases/download/preview/sing-server.zip)。最方便的方式是安装 Docker，在 `server/.env` 设置自己的 `SING_TOKEN`，然后在 server 目录运行 `docker compose up -d --build`。手机“去人声服务设置”填 `http://电脑局域网IP:8765` 和相同令牌，测试连接后使用“上传歌曲去人声”。自部署依然需要自己的硬件、电费和初次下载模型；服务按本文档部署即可兼容，无需修改模型工具的桌面界面。
 
@@ -69,7 +69,7 @@
 
 ## 构建
 
-JDK 17、Android SDK Platform 35、Build Tools 35.0.0 和 Python 3。先运行 `python -m pip install -r requirements-build.txt` 安装仅在构建阶段使用的压缩器；不会增加 APK 的运行依赖。
+JDK 17、Android SDK Platform 35、Build Tools 35.0.0 和 Python 3。先运行 `python -m pip install -r requirements-build.txt` 安装构建阶段使用的压缩器；构建脚本还会校验并准备固定版本的 TensorFlow Lite Android 运行库。
 
 APK 使用兼容 Android ZIP 格式的 Zopfli DEFLATE 压缩，保留不可压缩的资源表布局，再执行 zipalign 和原固定签名。打包器逐项校验解压后的字节一致。相同功能与许可全文下，本次本地包由 61,801 字节缩小至 57,681 字节（约 6.7%）；实际发布体积随版本信息略有变化。
 
@@ -81,7 +81,7 @@ ANDROID_HOME=/path/to/android-sdk bash build.sh
 
 默认使用 Android SDK 自带 R8 优化、裁剪和混淆代码，再按 ZIP 最大压缩率打包；保留 Activity 生命周期入口。可用 `NO_SHRINK=1` 构建相同功能的未裁剪对照包。没有引入第三方运行库，Android 8+ 使用 v2/v3 固定签名。
 
-产物 `build/sing.apk`。直接使用 SDK 工具，省去 Gradle 和依赖下载。推送 main 自动构建，并更新 `preview` 测试版 Release。
+产物 `build/sing.apk`。直接使用 SDK 工具，无需 Gradle。推送 main 自动构建，并更新 `preview` 测试版 Release。
 
 ### 固定签名和保留数据的升级
 
@@ -92,7 +92,7 @@ ANDROID_HOME=/path/to/android-sdk bash build.sh
 5. CI 使用 `SING_KEYSTORE_BASE64`、`SING_KEYSTORE_PASSWORD`（当前密钥密码 android，alias androiddebugkey），每次版本号自动增加。CI 私钥仅写入临时目录，完成后删除。
 6. 本地构建设置 `SIGNING_KEYSTORE=/private/path/sing-fixed.jks`，`SIGNING_PASSWORD=android`；或把备份恢复到被 git 忽略的 `build/development.jks`。不要更换密钥。CI 的 versionCode 为 1000 加运行序号；本地构建更新已安装 CI 包时需设置更大的 `VERSION_CODE`。
 
-这里实现的是小体积完整 APK 的**覆盖升级**，数据保留由 Android 的同包名、同签名安装机制提供。没有引入二进制增量补丁引擎；约几十 KB 的 APK，额外补丁组件会得不偿失。“下载更新”按钮打开新版 APK 下载页面，由系统安装器确认安装。应用仅在你选择安装更新时引导授予安装来源权限，并由系统安装器确认安装。
+这里实现的是小体积完整 APK 的**覆盖升级**，数据保留由 Android 的同包名、同签名安装机制提供。没有引入二进制增量补丁引擎；约 75 MB 的分离模型独立保存在应用数据内，日常更新仅下载程序和推理运行库，不重复下载模型。“下载更新”按钮打开新版 APK 下载页面，由系统安装器确认安装。应用仅在你选择安装更新时引导授予安装来源权限，并由系统安装器确认安装。
 
 如果曾安装其他来源的随机签名 CI 包，不能直接覆盖，需要先导出录音再迁移，不能通过更换签名绕过系统校验。
 
