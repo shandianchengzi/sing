@@ -20,3 +20,6 @@
 -keep class com.shandian.sing.LocalSeparation { *; }
 -keep class com.shandian.sing.LocalSeparation$Task { *; }
 -keep interface com.shandian.sing.SeparationClient$Progress { *; }
+
+-keep class com.shandian.sing.LocalSeparationService { *; }
+-keep class com.shandian.sing.LocalSeparationService$State { *; }

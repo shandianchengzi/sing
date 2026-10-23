@@ -57,7 +57,30 @@ public final class LocalSeparationInstrumentation extends Instrumentation {
       Method cancel=taskClass.getDeclaredMethod("cancel");cancel.setAccessible(true);cancel.invoke(cancelled);
       try { separate.invoke(null,target,Uri.parse("file:///does-not-exist"),"取消测试",cancelled,progress); throw new AssertionError("Cancellation ignored"); }
       catch(InvocationTargetException expected) { if(!(expected.getCause() instanceof InterruptedIOException)) throw expected; }
-      report.putInt("passed",passed+1); report.putString("stream","Local Spleeter smoke passed: WAV/MP3/AAC/M4A, original model numerical comparison, cancellation\n");
+      Activity screen=startActivitySync(new android.content.Intent().setClassName(target,"com.shandian.sing.MainActivity").addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK));
+      waitForIdleSync();
+      File foregroundInput=new File(target.getCacheDir(),"后台测试.wav");
+      try(InputStream in=getContext().getAssets().open("input.wav");OutputStream out=new FileOutputStream(foregroundInput)) {
+        byte[] bytes=new byte[65536];int n;while((n=in.read(bytes))!=-1)out.write(bytes,0,n);
+      }
+      Class<?> service=Class.forName("com.shandian.sing.LocalSeparationService",true,loader);
+      Field state=service.getDeclaredField("state");state.setAccessible(true);
+      target.startForegroundService(new android.content.Intent().setClassName(target,service.getName())
+        .putExtra("source",Uri.fromFile(foregroundInput).toString()).putExtra("title","后台测试"));
+      long deadline=System.currentTimeMillis()+10000;
+      while(state.get(null)==null && System.currentTimeMillis()<deadline) Thread.sleep(20);
+      Object job=state.get(null);
+      if(job==null)throw new AssertionError("Foreground service did not start");
+      // Leaving the activity must not destroy the processing service.
+      runOnMainSync(()->screen.moveTaskToBack(true));
+      target.startService(new android.content.Intent().setClassName(target,service.getName()).setAction("com.shandian.sing.CANCEL_LOCAL_SEPARATION"));
+      Field running=job.getClass().getDeclaredField("running");running.setAccessible(true);
+      Field wasCancelled=job.getClass().getDeclaredField("cancelled");wasCancelled.setAccessible(true);
+      deadline=System.currentTimeMillis()+30000;
+      while(running.getBoolean(job) && System.currentTimeMillis()<deadline) Thread.sleep(50);
+      if(running.getBoolean(job)||!wasCancelled.getBoolean(job))throw new AssertionError("Background foreground-service cancellation failed");
+      foregroundInput.delete();
+      report.putInt("passed",passed+2); report.putString("stream","Local Spleeter smoke passed: WAV/MP3/AAC/M4A, original model numerical comparison, cancellation, background foreground-service lifecycle\n");
       finish(Activity.RESULT_OK,report);
     } catch(Throwable e) { report.putString("stream",android.util.Log.getStackTraceString(e)); finish(Activity.RESULT_CANCELED,report); }
   }

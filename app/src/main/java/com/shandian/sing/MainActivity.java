@@ -1539,10 +1539,14 @@ public class MainActivity extends Activity {
         localProgress=new ProgressDialog(this);
         localProgress.setTitle("手机本地提取伴奏");
         localProgress.setCancelable(false);
-        localProgress.setButton(-2,"取消",(d,w)->{
+        localProgress.setButton(-2,"取消",(d,w)->{});
+        localProgress.show();
+        localProgress.getButton(-2).setOnClickListener(v->{
           startService(new Intent(this,LocalSeparationService.class).setAction(LocalSeparationService.CANCEL));
+          localProgress.getButton(-2).setEnabled(false);
+          localProgress.setMessage("正在取消，请等待当前分区结束…");
         });
-        localProgress.show(); controls();
+        controls();
       }
       localProgress.setMessage(job.text);
     } else {
