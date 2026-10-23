@@ -221,8 +221,10 @@ class Engine:
     def stop(self):
         if self.stream is not None:
             stream, self.stream = self.stream, None
-            stream.stop()
-            stream.close()
+            try:
+                stream.stop()
+            finally:
+                stream.close()
         self.finished = False
 
     def finish_record(self):

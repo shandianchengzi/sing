@@ -170,3 +170,11 @@ def test_recording_callback_start_pause_replay_and_levels(tmp_path):
     engine.voice_gain = .5
     np.testing.assert_allclose(engine.render(1024), mix(samples[:1024], samples[1024:2048], .5, .3))
     backing.close()
+
+
+def test_external_separation_title_survives_restart(library, tmp_path):
+    cached = wav(tmp_path / ('a' * 64 + '.wav'))
+    song = library.remember_external(cached, '我的歌曲（伴奏）')
+    assert song.title == '我的歌曲（伴奏）'
+    restored = Library(Store(library.store.root)).remember_external(cached)
+    assert restored.title == song.title

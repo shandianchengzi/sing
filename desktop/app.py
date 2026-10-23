@@ -184,6 +184,7 @@ class Window(QMainWindow):
         self.library_list.setSpacing(3)
         lib.addWidget(self.library_list, 1)
         lib.addWidget(button('管理曲库文件夹', self.folder_dialog))
+        lib.addWidget(button('添加单个伴奏', lambda: self.choose_audio(True)))
         lib.addWidget(button('添加伴奏 ＋ LRC', self.add_pair))
         lib.addWidget(button('扫描整理音频 / LRC', self.scan_dialog))
         self.library_note = label('仅匹配 歌名-伴奏.扩展名 / 歌名.lrc', 'eyebrow')
@@ -365,20 +366,20 @@ class Window(QMainWindow):
         value, _ = QFileDialog.getOpenFileName(self, '选择音频 / MP4', '', '音频与视频 (*.mp3 *.m4a *.wav *.ogg *.opus *.aac *.flac *.mp4 *.3gp);;所有文件 (*)')
         return Path(value) if value else None
 
-    def choose_audio(self):
+    def choose_audio(self, from_library=False):
         if not self.available():
             return
         source = self.pick_audio()
         if not source:
             return
-        if self.import_library.isChecked():
+        if from_library or self.import_library.isChecked():
             if not self.library.folders:
                 self.folder_dialog()
                 if not self.library.folders:
                     return
             title = self.ask_title()
             if title:
-                self.task('正在导入曲库…', lambda cancel, progress: self.library.import_audio(source, title, cancel=cancel), self.imported)
+                self.task('正在导入曲库…', lambda cancel, progress: self.library.import_audio(source, title, copy=self.store.data['copy'] if from_library else False, cancel=cancel), self.imported)
         else:
             self.load_song(self.library.remember_external(source))
 
@@ -544,6 +545,7 @@ class Window(QMainWindow):
             dialog.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
             if dialog.exec() == QMessageBox.StandardButton.Yes:
                 self.stop_playback()
+                delete_files = checkbox.isChecked()
                 def done(_):
                     if self.song and path_key(self.song.audio) == path_key(song.audio):
                         self.release_buffers()
@@ -552,8 +554,8 @@ class Window(QMainWindow):
                         self.lyrics = Lyrics()
                         self.song_label.setText('选择一首伴奏，开始唱歌')
                     self.refresh_library()
-                    self.notify('已删除源文件' if checkbox.isChecked() else '已移除曲库条目，源文件保留')
-                self.task('正在删除…', lambda c, p: self.library.remove(song, checkbox.isChecked()), done)
+                    self.notify('已删除源文件' if delete_files else '已移除曲库条目，源文件保留')
+                self.task('正在删除…', lambda c, p: self.library.remove(song, delete_files), done)
 
     def folder_dialog(self):
         if not self.available():
@@ -962,7 +964,10 @@ class Window(QMainWindow):
             except Exception as e:
                 self.fail(e)
         layout.addWidget(button('保存', save))
-        layout.addWidget(button('测试连接', lambda: self.task('正在测试服务…', lambda c, p: services.health(base.text(), token.text()), self.notify)))
+        def test_connection():
+            address, secret = base.text(), token.text()
+            self.task('正在测试服务…', lambda c, p: services.health(address, secret), self.notify)
+        layout.addWidget(button('测试连接', test_connection))
         dialog.exec()
 
     def separate_dialog(self):
@@ -975,7 +980,7 @@ class Window(QMainWindow):
         source = self.pick_audio()
         if source:
             self.task('正在检查伴奏缓存…', lambda c, p: services.separate(source, self.store.data['server'], self.store.data.get('token', ''), self.store.cache, c, p),
-                      lambda path: self.load_song(self.library.remember_external(path)))
+                      lambda path: self.load_song(self.library.remember_external(path, source.stem + '（伴奏）')))
 
     def device_settings(self):
         if not self.available():

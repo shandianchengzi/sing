@@ -291,13 +291,16 @@ class Library:
                         warnings.append(f'源文件无法删除，请手动清理：{old}')
         return Song(target, title, folder, lyrics_target if lyrics_target.exists() else None), '\n'.join(warnings) or '已导入本地曲库'
 
-    def remember_external(self, audio):
+    def remember_external(self, audio, title=None):
         p = Path(audio).resolve()
-        title = audio_title(p) or p.stem
-        if not any(path_key(r['audio']) == path_key(p) for r in self.store.data['external']):
+        row = next((r for r in self.store.data['external'] if path_key(r['audio']) == path_key(p)), None)
+        title = title or (row['title'] if row else audio_title(p) or p.stem)
+        if row is None:
             self.store.data['external'].append({'audio': str(p), 'title': title})
+        else:
+            row['title'] = title
         self.unhide(p)
-        companion = p.with_name(title + '.lrc') if audio_title(p) else None
+        companion = p.with_name((audio_title(p) or title) + '.lrc') if audio_title(p) else None
         return Song(p, title, None, companion if companion and companion.is_file() else None)
 
     def save_lyrics(self, song, text):
