@@ -2086,31 +2086,36 @@ public class MainActivity extends Activity {
     java.util.Arrays.sort(files, (a,b) -> Long.compare(b.lastModified(), a.lastModified()));
     String[] names = new String[files.length];
     for (int i=0; i<files.length; i++) names[i] = files[i].getName();
+    ListView list = new ListView(this);
+    list.setAdapter(new ArrayAdapter<String>(this, android.R.layout.simple_list_item_1, names));
+    AlertDialog recordings = new AlertDialog.Builder(this).setTitle("已保存的录音（长按可删除）")
+        .setView(list).setNegativeButton("关闭", null).create();
+    list.setOnItemClickListener((parent, view, index, id) -> {
+      stopVoice();
+      take = files[index];
+      message("已选择：" + take.getName());
+      controls();
+      recordings.dismiss();
+    });
+    list.setOnItemLongClickListener((parent, view, index, id) -> {
+      confirmTakeDeletion(files[index], () -> {
+        recordings.dismiss();
+        chooseTake();
+      });
+      return true;
+    });
+    recordings.show();
+  }
+
+  void confirmTakeDeletion(File selected, Runnable after) {
     new AlertDialog.Builder(this)
-        .setTitle("已保存的录音")
-        .setItems(names, (dialog, index) -> {
-          File selected = files[index];
-          new AlertDialog.Builder(this)
-              .setTitle(selected.getName())
-              .setItems(new String[]{"选中以回听／导出", "删除这条录音"}, (d, action) -> {
-                if (action == 0) {
-                  stopVoice();
-                  take = selected;
-                  message("已选择：" + take.getName());
-                  controls();
-                } else {
-                  new AlertDialog.Builder(this)
-                      .setTitle("确认永久删除录音？")
-                      .setMessage(selected.getName() + "\n同时删除这条录音的时间轴信息，不会删除伴奏或 LRC。")
-                      .setNegativeButton("取消", null)
-                      .setPositiveButton("删除", (confirm, which) -> deleteTake(selected))
-                      .show();
-                }
-              })
-              .setNegativeButton("取消", null)
-              .show();
+        .setTitle("是否删除这条录音？")
+        .setMessage(selected.getName() + "\n将同时删除这条录音的时间轴信息，不会删除伴奏或 LRC。")
+        .setNegativeButton("否，保留", null)
+        .setPositiveButton("是，删除", (confirm, which) -> {
+          deleteTake(selected);
+          if (!selected.exists() && after != null) after.run();
         })
-        .setNegativeButton("关闭", null)
         .show();
   }
 
