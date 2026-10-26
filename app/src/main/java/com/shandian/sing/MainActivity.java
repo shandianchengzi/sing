@@ -19,6 +19,8 @@ public class MainActivity extends Activity {
   AppUpdater updater;
   Uri pendingPairAudio;
   java.util.ArrayList<Uri> libraryFolders = new java.util.ArrayList<>();
+  java.util.ArrayList<WebDavLibrary.Config> webDavLibraries = new java.util.ArrayList<>();
+  java.util.Map<String, WebDavLibrary.Entry> webDavItems = new java.util.LinkedHashMap<>();
   String pendingPairName;
   boolean importingPair, scanningFolders;
   int folderScanId, folderOpenId;
@@ -96,6 +98,7 @@ public class MainActivity extends Activity {
     preferences = getSharedPreferences("session", MODE_PRIVATE);
     localHandled = preferences.getLong("local_separation_handled", 0);
     loadLibraryFolders();
+    loadWebDavLibraries();
     updater =
         new AppUpdater(
             this, () -> !recording && !starting && !previewSeeking && !separating && !exporting && !importingPair);
@@ -527,6 +530,53 @@ public class MainActivity extends Activity {
     startActivityForResult(intent, 6);
   }
 
+  void loadWebDavLibraries() {
+    webDavLibraries.clear();
+    try {
+      org.json.JSONArray rows = new org.json.JSONArray(preferences.getString("webdav_libraries", "[]"));
+      for (int i = 0; i < rows.length(); i++) {
+        org.json.JSONObject row = rows.optJSONObject(i);
+        if (row != null) webDavLibraries.add(new WebDavLibrary.Config(
+            row.optString("url"), row.optString("username"), row.optString("password")));
+      }
+    } catch (Exception e) { preferences.edit().remove("webdav_libraries").apply(); }
+  }
+
+  void saveWebDavLibraries() {
+    org.json.JSONArray rows = new org.json.JSONArray();
+    for (WebDavLibrary.Config config : webDavLibraries) {
+      try { rows.put(new org.json.JSONObject().put("url", config.url)
+          .put("username", config.username).put("password", config.password)); }
+      catch (org.json.JSONException ignored) {}
+    }
+    preferences.edit().putString("webdav_libraries", rows.toString()).apply();
+  }
+
+  void addWebDavLibrary() {
+    LinearLayout form = new LinearLayout(this); form.setOrientation(LinearLayout.VERTICAL);
+    int padding = (int) (20 * getResources().getDisplayMetrics().density); form.setPadding(padding, 0, padding, 0);
+    EditText url = new EditText(this); url.setHint("https://dav.example.com/music/"); url.setSingleLine(true); form.addView(url);
+    EditText username = new EditText(this); username.setHint("用户名（可留空）"); username.setSingleLine(true); form.addView(username);
+    EditText password = new EditText(this); password.setHint("密码（可留空）"); password.setSingleLine(true);
+    password.setInputType(android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD); form.addView(password);
+    AlertDialog dialog = new AlertDialog.Builder(this).setTitle("添加 WebDAV 远程曲库").setView(form)
+        .setNegativeButton("取消", null).setPositiveButton("连接并添加", null).create();
+    dialog.setOnShowListener(ignored -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+      final WebDavLibrary.Config config;
+      try { config = new WebDavLibrary.Config(url.getText().toString(), username.getText().toString(), password.getText().toString()); }
+      catch (Exception e) { url.setError(e.getMessage()); return; }
+      dialog.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(false);
+      message("正在连接 WebDAV…");
+      new Thread(() -> {
+        try {
+          WebDavLibrary.scan(config);
+          handler.post(() -> { if (isDestroyed()) return; webDavLibraries.add(config); saveWebDavLibraries(); dialog.dismiss(); showLibrary(); });
+        } catch (Exception e) { handler.post(() -> { if (!isDestroyed()) { dialog.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(true); error(e); } }); }
+      }, "webdav-test").start();
+    }));
+    dialog.show();
+  }
+
   void showLibrary() {
     if (!canNavigate()) return;
     LinearLayout content = subpage("本地曲库");
@@ -534,6 +584,7 @@ public class MainActivity extends Activity {
     help.setText("可管理多个曲库文件夹。第一个是默认导入目标；只匹配“歌名-伴奏.扩展名”和“歌名.lrc”。旧文件请使用下方扫描整理。");
     content.addView(help);
     pageButton(content, "添加曲库文件夹", () -> chooseFolder());
+    pageButton(content, "添加 WebDAV 远程曲库", () -> addWebDavLibrary());
     if (libraryFolders.isEmpty()) {
       TextView missing = new TextView(this);
       missing.setText("暂无曲库文件夹，请点击上方按钮添加。");
@@ -579,6 +630,17 @@ public class MainActivity extends Activity {
                 showLibrary();
               }).show());
     }
+    for (int i = 0; i < webDavLibraries.size(); i++) {
+      final int index = i; WebDavLibrary.Config config = webDavLibraries.get(i);
+      LinearLayout row = new LinearLayout(this); row.setOrientation(LinearLayout.HORIZONTAL); content.addView(row);
+      TextView label = new TextView(this); label.setText("WebDAV：" + config.label()); row.addView(label, new LinearLayout.LayoutParams(0, -2, 1));
+      Button remove = new Button(this); remove.setText("移除"); row.addView(remove);
+      remove.setOnClickListener(v -> new AlertDialog.Builder(this).setTitle("移除远程曲库？")
+          .setMessage("只删除连接配置和缓存索引，不会删除 WebDAV 上的文件。")
+          .setNegativeButton("取消", null).setPositiveButton("移除", (d,w) -> {
+            webDavLibraries.remove(index); saveWebDavLibraries(); showLibrary();
+          }).show());
+    }
     CheckBox checkbox = new CheckBox(this);
     checkbox.setText("复制而不是移动（保留原文件）");
     checkbox.setChecked(preferences.getBoolean("copy_instead_of_move", false));
@@ -617,8 +679,10 @@ public class MainActivity extends Activity {
     folderItems.clear();
     scanningFolders = true;
     final java.util.ArrayList<Uri> folders = new java.util.ArrayList<>(libraryFolders);
-    if (folders.isEmpty()) { scanningFolders = false; return; }
-    message("正在扫描 " + folders.size() + " 个曲库文件夹…");
+    final java.util.ArrayList<WebDavLibrary.Config> remote = new java.util.ArrayList<>(webDavLibraries);
+    webDavItems.clear();
+    if (folders.isEmpty() && remote.isEmpty()) { scanningFolders = false; return; }
+    message("正在扫描 " + (folders.size() + remote.size()) + " 个曲库…");
     new Thread(() -> {
       java.util.ArrayList<FolderLibrary.Item> files = new java.util.ArrayList<>();
       java.util.ArrayList<String> failed = new java.util.ArrayList<>();
@@ -626,14 +690,20 @@ public class MainActivity extends Activity {
         try { files.addAll(FolderLibrary.scan(getApplicationContext(), folder)); }
         catch (Exception e) { failed.add(folderLabel(folder)); }
       }
+      java.util.LinkedHashMap<String, WebDavLibrary.Entry> remoteFiles = new java.util.LinkedHashMap<>();
+      for (WebDavLibrary.Config config : remote) {
+        try { for (WebDavLibrary.Entry entry : WebDavLibrary.scan(config)) remoteFiles.put(entry.url, entry); }
+        catch (Exception e) { failed.add("WebDAV " + config.label() + "：" + e.getMessage()); }
+      }
       handler.post(() -> {
         if (version != folderScanId || isDestroyed()
             || secondaryPage == null || list != libraryList) return;
         folderItems = files;
+        webDavItems = remoteFiles;
         scanningFolders = false;
         renderLibrary(list, search.getText().toString());
-        if (failed.isEmpty()) message("已扫描 " + folders.size() + " 个曲库");
-        else message("以下曲库无法访问，请重新授权：" + android.text.TextUtils.join("、", failed));
+        if (failed.isEmpty()) message("已扫描 " + (folders.size() + remote.size()) + " 个曲库");
+        else message("部分曲库无法访问：" + android.text.TextUtils.join("、", failed));
       });
     }, "multi-library-scan").start();
   }
@@ -663,6 +733,14 @@ public class MainActivity extends Activity {
       try { record.put("title",LibraryNames.audioTitle(file.name)).put("filename",file.name); }
       catch(org.json.JSONException ignored) {}
       if(!preferences.getBoolean("hidden:"+source,false)) addGrouped(groups, record);
+    }
+    for (WebDavLibrary.Entry file : webDavItems.values()) {
+      try {
+        org.json.JSONObject record = new org.json.JSONObject().put("uri", file.url)
+            .put("title", LibraryNames.audioTitle(file.name)).put("filename", file.name)
+            .put("remote", true);
+        if (!preferences.getBoolean("hidden:" + file.url, false)) addGrouped(groups, record);
+      } catch (org.json.JSONException ignored) {}
     }
     // Only canonical filenames can participate in the library, including saved entries.
     for (int i = 0; i < stored.length(); i++) {
@@ -719,8 +797,9 @@ public class MainActivity extends Activity {
     String[] options = new String[copies.size()];
     for (int i = 0; i < copies.size(); i++) {
       FolderLibrary.Item file = folderItem(copies.get(i));
-      options[i] = (file == null ? "外部文件" : folderLabel(file.folder))
-          + " · " + (file == null ? name(Uri.parse(copies.get(i))) : file.name);
+      WebDavLibrary.Entry remote = webDavItems.get(copies.get(i));
+      options[i] = (remote != null ? "WebDAV " + remote.config.label() : file == null ? "外部文件" : folderLabel(file.folder))
+          + " · " + (remote != null ? remote.name : file == null ? name(Uri.parse(copies.get(i))) : file.name);
     }
     new AlertDialog.Builder(this).setTitle("选择文件来源")
         .setItems(options, (dialog, index) -> onSelected.accept(copies.get(index)))
@@ -744,6 +823,8 @@ public class MainActivity extends Activity {
 
   void selectLibraryAudio(String source, String title, FolderLibrary.Item file) {
     if(!canNavigate()) return;
+    WebDavLibrary.Entry remote = webDavItems.get(source);
+    if (remote != null) { openWebDavAudio(remote, title); return; }
     final int version = ++folderOpenId;
     final Uri pairing = pairedLyrics(source, file);
     if (pairing == null) {
@@ -771,6 +852,33 @@ public class MainActivity extends Activity {
         handler.post(() -> { if (!isDestroyed() && version == folderOpenId) error(e); });
       }
     }, "folder-lyrics").start();
+  }
+
+  void openWebDavAudio(WebDavLibrary.Entry entry, String title) {
+    final int version = ++folderOpenId;
+    message("正在从 WebDAV 获取伴奏…");
+    new Thread(() -> {
+      try {
+        File directory = new File(getFilesDir(), "webdav");
+        File audioFile = WebDavLibrary.download(entry.config, entry.url, directory, entry.name);
+        String lyrics = "";
+        if (entry.lyricsUrl != null) {
+          File lyricsFile = WebDavLibrary.download(entry.config, entry.lyricsUrl, directory, title + ".lrc");
+          lyrics = FolderLibrary.readLrc(getApplicationContext(), Uri.fromFile(lyricsFile));
+          if (new Lrc(lyrics).lines.isEmpty()) throw new IOException("远程 LRC 缺少有效时间戳");
+        }
+        final String text = lyrics;
+        handler.post(() -> {
+          if (isDestroyed() || version != folderOpenId) return;
+          rememberAudio(entry.url, title);
+          if (!text.isEmpty()) libraryField(entry.url, "lrc", text);
+          originalAudio = entry.url;
+          preferences.edit().putString("audio", entry.url).apply();
+          returnHome();
+          importAudio(Uri.fromFile(audioFile), title);
+        });
+      } catch (Exception e) { handler.post(() -> { if (!isDestroyed() && version == folderOpenId) error(e); }); }
+    }, "webdav-download").start();
   }
 
   void chooseTargetFolder(String title, java.util.function.Consumer<Uri> action) {
@@ -941,11 +1049,14 @@ public class MainActivity extends Activity {
       entry.setText(title);
       titleRow.addView(entry, new LinearLayout.LayoutParams(0, -2, 1));
       Button lyrics = new Button(this);
-      lyrics.setText(item.optString("lrc").isEmpty() && pairedLyrics(source, file) == null ? "LRC" : "LRC ✓");
+      WebDavLibrary.Entry remoteItem = webDavItems.get(source);
+      lyrics.setText(item.optString("lrc").isEmpty() && pairedLyrics(source, file) == null
+          && (remoteItem == null || remoteItem.lyricsUrl == null) ? "LRC" : "LRC ✓");
       titleRow.addView(lyrics);
+      lyrics.setEnabled(remoteItem == null);
       lyrics.setOnClickListener(v->chooseSongSource(source,chosen->lyricsOptions(chosen)));
       Button edit=new Button(this); edit.setText("编辑"); titleRow.addView(edit);
-      edit.setEnabled(!scanningFolders && !importingPair);
+      edit.setEnabled(!scanningFolders && !importingPair && !webDavItems.containsKey(source));
       edit.setOnClickListener(v->chooseSongSource(source,chosen->
           new AlertDialog.Builder(this).setTitle(title).setItems(new String[]{"整理到","改名","删除"},(d,which)->{
             if(which==0) chooseTargetFolder("选择目标曲库",target->relocateLibraryItem(chosen,title,
@@ -1689,13 +1800,32 @@ public class MainActivity extends Activity {
       if (!saved.isEmpty()) libraryField(originalAudio, "lrc", saved);
       preferences.edit().putBoolean("paired_lrc", true).apply();
     }
-    if (!originalAudio.isEmpty())
+    if (originalAudio.startsWith("http://") || originalAudio.startsWith("https://")) {
+      restoreWebDav(originalAudio);
+    } else if (!originalAudio.isEmpty())
       try {
         Uri uri = Uri.parse(originalAudio);
         importAudio(uri, name(uri));
       } catch (Exception e) {
         message("原伴奏已移动或权限失效，请重新选择；录音仍然保留。");
       }
+  }
+
+  void restoreWebDav(String source) {
+    message("正在恢复 WebDAV 伴奏…");
+    new Thread(() -> {
+      try {
+        WebDavLibrary.Entry found = null;
+        for (WebDavLibrary.Config config : webDavLibraries) {
+          for (WebDavLibrary.Entry entry : WebDavLibrary.scan(config))
+            if (entry.url.equals(source)) { found = entry; break; }
+          if (found != null) break;
+        }
+        if (found == null) throw new IOException("远程伴奏已移动，或对应 WebDAV 曲库已移除");
+        WebDavLibrary.Entry selected = found;
+        handler.post(() -> { if (!isDestroyed()) openWebDavAudio(selected, LibraryNames.audioTitle(selected.name)); });
+      } catch (Exception e) { handler.post(() -> { if (!isDestroyed()) message("无法恢复 WebDAV 伴奏：" + e.getMessage()); }); }
+    }, "webdav-restore").start();
   }
 
   void openAudio(Uri uri, String title) {
