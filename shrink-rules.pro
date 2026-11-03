@@ -3,6 +3,7 @@
     public <init>();
     public *;
     protected *;
+    android.widget.Button externalRecord;
 }
 -dontwarn java.lang.invoke.StringConcatFactory
 -keepattributes *Annotation*
