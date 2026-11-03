@@ -2201,7 +2201,7 @@ public class MainActivity extends Activity {
   }
 
   void chooseTake() {
-    if (recording || starting || separating || exporting || importingPair) return;
+    if (recording || starting || separating || exporting || importingPair || ExternalRecordingService.isRecording()) return;
     File[] files = getFilesDir().listFiles((d, n) -> n.endsWith(".m4a"));
     if (files == null || files.length == 0) { message("暂无录音"); return; }
     java.util.Arrays.sort(files, (a,b) -> Long.compare(b.lastModified(), a.lastModified()));
@@ -2241,7 +2241,7 @@ public class MainActivity extends Activity {
   }
 
   void deleteTake(File selected) {
-    if (recording || starting || separating || exporting || importingPair) return;
+    if (recording || starting || separating || exporting || importingPair || ExternalRecordingService.isRecording()) return;
     boolean current = selected.equals(take);
     if (current) stopVoice();
     if (!selected.delete()) {
