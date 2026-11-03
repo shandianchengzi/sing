@@ -246,7 +246,6 @@ public class MainActivity extends Activity {
     take = latest();
     controls();
     restoreSession();
-    handler.post(tick);
   }
 
   @Override protected void onResume() {
@@ -1797,6 +1796,7 @@ public class MainActivity extends Activity {
 
   @Override protected void onStart() {
     super.onStart();
+    handler.post(tick);
     handler.post(localTick);
   }
   void startSeparation(Uri uri, String title) {
@@ -2477,6 +2477,7 @@ public class MainActivity extends Activity {
 
   @Override
   protected void onStop() {
+    handler.removeCallbacks(tick);
     handler.removeCallbacks(localTick);
     if(localProgress!=null) { localProgress.dismiss(); localProgress=null; }
     super.onStop();
