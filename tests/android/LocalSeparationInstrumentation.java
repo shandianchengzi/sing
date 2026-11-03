@@ -80,7 +80,73 @@ public final class LocalSeparationInstrumentation extends Instrumentation {
       while(running.getBoolean(job) && System.currentTimeMillis()<deadline) Thread.sleep(50);
       if(running.getBoolean(job)||!wasCancelled.getBoolean(job))throw new AssertionError("Background foreground-service cancellation failed");
       foregroundInput.delete();
-      report.putInt("passed",passed+2); report.putString("stream","Local Spleeter smoke passed: WAV/MP3/AAC/M4A, original model numerical comparison, cancellation, background foreground-service lifecycle\n");
+
+      // Reopen the UI (Spleeter smoke moved it to the background) and verify
+      // that external capture genuinely survives losing the visible Activity.
+      Activity again=startActivitySync(new android.content.Intent()
+          .setClassName(target,"com.shandian.sing.MainActivity")
+          .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK
+              | android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP));
+      waitForIdleSync();
+      if (target.checkSelfPermission("android.permission.RECORD_AUDIO")
+          != android.content.pm.PackageManager.PERMISSION_GRANTED)
+        throw new AssertionError("RECORD_AUDIO must be granted to run the background smoke test");
+      Class<?> external=Class.forName("com.shandian.sing.ExternalRecordingService",true,loader);
+      Method active=external.getDeclaredMethod("isRecording"); active.setAccessible(true);
+      Method muted=external.getDeclaredMethod("isSilenced"); muted.setAccessible(true);
+      Field buttonField=again.getClass().getDeclaredField("externalRecord");
+      buttonField.setAccessible(true);
+      android.widget.Button startButton=(android.widget.Button)buttonField.get(again);
+      // Wait for its pre-bound local service to become ready.
+      long readyUntil=System.currentTimeMillis()+8000;
+      while (!startButton.isEnabled() && System.currentTimeMillis()<readyUntil)
+        Thread.sleep(50);
+      if (!startButton.isEnabled()) throw new AssertionError("Microphone service binding never became ready");
+      runOnMainSync(()->startButton.performClick());
+      long recordingUntil=System.currentTimeMillis()+10000;
+      while (!((Boolean)active.invoke(null)).booleanValue()
+          && System.currentTimeMillis()<recordingUntil) Thread.sleep(50);
+      if (!((Boolean)active.invoke(null)).booleanValue())
+        throw new AssertionError("External recorder failed to start: "
+            + target.getSharedPreferences("session",Context.MODE_PRIVATE)
+                .getString("external_capture_diagnostic","unknown"));
+      Thread.sleep(1300);
+      runOnMainSync(()->again.moveTaskToBack(true));
+      Thread.sleep(2600);
+      if (!((Boolean)active.invoke(null)).booleanValue())
+        throw new AssertionError("External recorder stopped when Activity entered background");
+      if (((Boolean)muted.invoke(null)).booleanValue())
+        throw new AssertionError("Android marked background microphone capture as silenced");
+
+      target.startService(new android.content.Intent()
+          .setClassName(target,external.getName())
+          .setAction("com.shandian.sing.EXTERNAL_STOP"));
+      long savedUntil=System.currentTimeMillis()+10000;
+      while (((Boolean)active.invoke(null)).booleanValue()
+          && System.currentTimeMillis()<savedUntil) Thread.sleep(50);
+      if (((Boolean)active.invoke(null)).booleanValue())
+        throw new AssertionError("External recorder stop action did not finish");
+      String savedPath=target.getSharedPreferences("session",Context.MODE_PRIVATE)
+          .getString("external_result_file","");
+      if (savedPath.isEmpty()) throw new AssertionError("External recording not saved: "
+          + target.getSharedPreferences("session",Context.MODE_PRIVATE)
+              .getString("external_capture_diagnostic","unknown"));
+      File recordingFile=new File(savedPath);
+      if (!recordingFile.isFile() || recordingFile.length()<500)
+        throw new AssertionError("External recording contains no valid media");
+      android.media.MediaMetadataRetriever info=new android.media.MediaMetadataRetriever();
+      try {
+        info.setDataSource(savedPath);
+        String duration=info.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION);
+        if (duration==null || Long.parseLong(duration)<2000)
+          throw new AssertionError("External take duration too short: "+duration);
+      } finally {
+        info.release();
+        recordingFile.delete();
+        new File(savedPath+".json").delete();
+      }
+      report.putInt("passed",passed+5); report.putString("stream",
+          "Spleeter + background external microphone smoke passed (WAV/MP3/AAC/M4A; capture persisted after Activity backgrounding)\n");
       finish(Activity.RESULT_OK,report);
     } catch(Throwable e) { report.putString("stream",android.util.Log.getStackTraceString(e)); finish(Activity.RESULT_CANCELED,report); }
   }
