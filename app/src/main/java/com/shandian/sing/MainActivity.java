@@ -32,7 +32,7 @@ public class MainActivity extends Activity {
   FrameLayout pages;
   View homePage, secondaryPage;
   TextView status, song, previous, current, next, clock;
-  Button record, preview, listen, export, importLrcButton;
+  Button record, externalRecord, preview, listen, export, importLrcButton;
   CheckBox importToLibrary;
   String libraryWorkNote = "";
   SeekBar seek;
@@ -48,6 +48,8 @@ public class MainActivity extends Activity {
   TakeInfo pendingInfo;
   int pendingMode;
   boolean exporting, starting, previewSeeking;
+  Thread quickThread;
+  long handledExternalResult, lastExternalPoll;
   long recordingStart;
   String loadedSource = "";
   Runnable afterAudioReady;
@@ -88,6 +90,10 @@ public class MainActivity extends Activity {
             current.setText(i >= 0 ? lrc.lines.get(i).text : "准备好，开始唱");
             next.setText(i + 1 < lrc.lines.size() ? lrc.lines.get(i + 1).text : "");
           }
+          if (SystemClock.elapsedRealtime() - lastExternalPoll > 800) {
+            lastExternalPoll = SystemClock.elapsedRealtime();
+            if (externalRecord != null) refreshExternalRecording();
+          }
           handler.postDelayed(this, 80);
         }
       };
@@ -97,11 +103,12 @@ public class MainActivity extends Activity {
     super.onCreate(state);
     preferences = getSharedPreferences("session", MODE_PRIVATE);
     localHandled = preferences.getLong("local_separation_handled", 0);
+    handledExternalResult = preferences.getLong("external_handled_seq", 0);
     loadLibraryFolders();
     loadWebDavLibraries();
     updater =
         new AppUpdater(
-            this, () -> !recording && !starting && !previewSeeking && !separating && !exporting && !importingPair);
+            this, () -> !recording && !starting && !previewSeeking && !separating && !exporting && !importingPair && !ExternalRecordingService.isRecording());
     getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
     root = new LinearLayout(this);
     root.setOrientation(1);
@@ -123,7 +130,7 @@ public class MainActivity extends Activity {
     status = text("戴耳机录制；从伴奏当前位置开始，可同步回听和导出混音。", 13);
     song = text("尚未选择伴奏", 15);
     LinearLayout backingRow=new LinearLayout(this); root.addView(backingRow);
-    Button choose=new Button(this); choose.setText("选择伴奏");
+    Button choose=new Button(this); choose.setText("选择伴奏 / 原曲");
     backingRow.addView(choose,new LinearLayout.LayoutParams(0,-2,1));
     importToLibrary=new CheckBox(this); importToLibrary.setText("导入本地曲库");
     importToLibrary.setChecked(preferences.getBoolean("import_to_library",true));
@@ -225,6 +232,8 @@ public class MainActivity extends Activity {
               if (recording) finishTake();
               else begin();
             });
+    externalRecord = button("外部伴奏录音（切换 App 继续）", () -> toggleExternalRecording());
+    button("快速提取伴奏（不使用 AI）", () -> pick(11, "*/*"));
     voiceGain = preferences.getFloat("voice_gain", 1);
     backingGain = preferences.getFloat("backing_gain", 1);
     volume("人声", true);
@@ -240,8 +249,52 @@ public class MainActivity extends Activity {
     handler.post(tick);
   }
 
+  @Override protected void onResume() {
+    super.onResume();
+    if (externalRecord != null) refreshExternalRecording();
+  }
+
+  void toggleExternalRecording() {
+    if (ExternalRecordingService.isRecording()) {
+      startService(new Intent(this, ExternalRecordingService.class).setAction(ExternalRecordingService.STOP));
+      message("正在停止并保存外部录音…");
+      return;
+    }
+    if (recording || starting || separating || exporting || importingPair || previewSeeking) {
+      message("请先完成当前录音或处理");
+      return;
+    }
+    if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+      requestPermissions(new String[] {Manifest.permission.RECORD_AUDIO}, 19);
+      return;
+    }
+    stopVoice();
+    if (player != null && ready && player.isPlaying()) player.pause();
+    try {
+      startForegroundService(new Intent(this, ExternalRecordingService.class)
+          .setAction(ExternalRecordingService.START));
+      message("正在启动外部录音；可以切回音乐 App，伴奏不会被主动暂停");
+      controls();
+    } catch (RuntimeException e) { error(e); }
+  }
+
+  void refreshExternalRecording() {
+    long seq = preferences.getLong("external_result_seq", 0);
+    if (seq != 0 && seq != handledExternalResult) {
+      handledExternalResult = seq;
+      preferences.edit().putLong("external_handled_seq", seq).apply();
+      String path = preferences.getString("external_result_file", "");
+      String failure = preferences.getString("external_recording_error", "");
+      if (!path.isEmpty() && new File(path).isFile()) {
+        take = new File(path);
+        message("外部录音已保存，可在历史录音中回听或导出人声");
+      } else if (!failure.isEmpty()) message(failure);
+    }
+    controls();
+  }
+
   boolean canNavigate() {
-    if (recording || starting || previewSeeking || separating || exporting || importingPair) {
+    if (recording || starting || previewSeeking || separating || exporting || importingPair || ExternalRecordingService.isRecording()) {
       message("请先完成当前录音或处理");
       return false;
     }
@@ -1147,12 +1200,14 @@ public class MainActivity extends Activity {
   }
 
   void controls() {
-    boolean busy = recording || starting || previewSeeking || separating || exporting || importingPair;
+    boolean external = ExternalRecordingService.isRecording();
+    boolean busy = recording || starting || previewSeeking || separating || exporting || importingPair || external;
+    externalRecord.setText(external ? "停止外部录音并保存" : "外部伴奏录音（切换 App 继续）");
+    externalRecord.setEnabled(external || !busy);
     record.setText(recording ? "停止并保存录音" : "从当前位置开始录音");
     record.setEnabled(
-        (ready || !loadedSource.isEmpty()) && replay == null && !starting
-            && !previewSeeking && !separating && !exporting && !importingPair);
-    preview.setEnabled((ready || replay != null) && !busy);
+        (ready || !loadedSource.isEmpty()) && replay == null && !busy);
+    preview.setEnabled((replay == null ? ready : replayInfo != null && !replayInfo.source.isEmpty() && ready) && !busy);
     seek.setEnabled((ready || (replay != null && replay.ready)) && !busy);
     listen.setEnabled(!busy && take != null);
     listen.setText(
@@ -1165,6 +1220,7 @@ public class MainActivity extends Activity {
 
   void pick(int code, String type) {
     if(code==2 && loadedSource.isEmpty()) { message("请先选择伴奏"); return; }
+    if (ExternalRecordingService.isRecording()) { message("请先停止外部录音"); return; }
     if (starting || previewSeeking || exporting || importingPair) {
       message("请等待当前操作完成");
       return;
@@ -1179,7 +1235,7 @@ public class MainActivity extends Activity {
     }
     Intent intent =
         new Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType(type);
-    if (code == 1 || code == 4 || code == 7 || code == 9)
+    if (code == 1 || code == 4 || code == 7 || code == 9 || code == 11)
       intent.putExtra(
           Intent.EXTRA_MIME_TYPES,
           new String[] {
@@ -1228,14 +1284,24 @@ public class MainActivity extends Activity {
         saveGrant(uri, data.getFlags());
         if(libraryFolders.isEmpty()) throw new IOException("请先选择曲库文件夹");
         addPair(uri, pendingPairName+".lrc", libraryFolders.get(0));
-      } else if (code == 1 || code == 9) {
+      } else if (code == 1 || code == 9 || code == 11) {
         saveGrant(uri,data.getFlags());
-        if(code==9 || importToLibrary.isChecked()) askSong("",title->{
+        String filename = name(uri);
+        boolean quick = code == 11 || LibraryNames.audioTitle(filename).isEmpty();
+        if (quick) {
+          String guess = LibraryNames.stem(filename);
+          if (!LibraryNames.validTitle(guess)) guess = "";
+          final boolean toLibrary = code == 9 || (code == 1 && importToLibrary.isChecked());
+          if (toLibrary) askSong(guess, title ->
+              resolveSong(title, () -> startQuickSeparation(uri, title, true)));
+          else if (LibraryNames.validTitle(guess)) startQuickSeparation(uri, guess, false);
+          else askSong("", title -> startQuickSeparation(uri, title, false));
+        } else if(code==9 || importToLibrary.isChecked()) askSong("",title->{
           resolveSong(title,()->importSingle(uri,title,code==1 || !preferences.getBoolean("copy_instead_of_move",false),null));
         });
         else {
           originalAudio=uri.toString(); preferences.edit().putString("audio",originalAudio).apply();
-          importAudio(uri,name(uri));
+          importAudio(uri,filename);
         }
       } else if (code == 2 || code == 5) {
         if(code==2 && loadedSource.isEmpty()) throw new IOException("请先选择伴奏");
@@ -1607,6 +1673,61 @@ public class MainActivity extends Activity {
     dialog.show();
   }
 
+
+  /** Process an original song only when a prepared backing track is missing. */
+  void startQuickSeparation(Uri source, String title, boolean intoLibrary) {
+    if (recording || starting || separating || exporting || importingPair
+        || ExternalRecordingService.isRecording()) return;
+    stopVoice();
+    if (ready && player != null && player.isPlaying()) player.pause();
+    separating = true;
+    controls();
+    ProgressDialog progress = new ProgressDialog(this);
+    progress.setTitle("快速去原唱 · 轻量模式");
+    progress.setMessage("正在准备音轨…");
+    progress.setCancelable(false);
+    progress.setButton(-2, "取消", (d, w) -> {});
+    progress.show();
+    quickThread = new Thread(() -> {
+      File result = null;
+      Exception failure = null;
+      try {
+        result = QuickSeparation.separate(getApplicationContext(), source,
+            text -> handler.post(() -> {
+              if (!isDestroyed()) progress.setMessage(text);
+            }));
+      } catch (Exception e) { failure = e; }
+      final File finalResult = result;
+      final Exception finalFailure = failure;
+      handler.post(() -> {
+        quickThread = null;
+        separating = false;
+        progress.dismiss();
+        if (isDestroyed()) return;
+        controls();
+        if (finalFailure != null) {
+          message(finalFailure instanceof InterruptedIOException
+              ? "已取消快速消音" : "快速消音失败：" + finalFailure.getMessage());
+          return;
+        }
+        if (intoLibrary) {
+          importSingle(Uri.fromFile(finalResult), title, false, null);
+        } else {
+          originalAudio = Uri.fromFile(finalResult).toString();
+          preferences.edit().putString("audio", originalAudio).apply();
+          importAudio(Uri.fromFile(finalResult), title + "-伴奏.wav");
+          message("已使用轻量算法生成近似伴奏；居中乐器也可能被削弱");
+        }
+      });
+    }, "quick-center-cancellation");
+    progress.getButton(-2).setOnClickListener(v -> {
+      if (quickThread != null) quickThread.interrupt();
+      progress.getButton(-2).setEnabled(false);
+      progress.setMessage("正在取消…");
+    });
+    quickThread.start();
+  }
+
   void chooseLocalSeparation() {
     if (!canNavigate()) return;
     if (SpleeterModel.installed(this)) { pick(10, "*/*"); return; }
@@ -1934,7 +2055,7 @@ public class MainActivity extends Activity {
   }
 
   void begin() {
-    if (replay != null || starting || previewSeeking || separating || exporting || importingPair) return;
+    if (replay != null || starting || previewSeeking || separating || exporting || importingPair || ExternalRecordingService.isRecording()) return;
     if (!ready) {
       if (loadedSource.isEmpty()) { message("请先导入伴奏"); return; }
       starting = true;
@@ -2136,7 +2257,7 @@ public class MainActivity extends Activity {
   }
 
   void playTake() {
-    if (take == null || recording || starting || separating || exporting) return;
+    if (take == null || recording || starting || separating || exporting || ExternalRecordingService.isRecording()) return;
     if (replay != null) {
       if (!replay.ready) {
         stopVoice();
@@ -2169,9 +2290,11 @@ public class MainActivity extends Activity {
                   controls();
                   if (replay != null && replay.ready)
                     message(
-                        replayInfo.legacy
-                            ? "旧录音按 00:00 对齐当前伴奏，请确认伴奏正确"
-                            : "同步回听：拖动进度条定位，音量设置同时用于导出");
+                        replayInfo.source.isEmpty()
+                            ? "外部录音：仅播放人声，未包含其他 App 的音乐"
+                            : replayInfo.legacy
+                                ? "旧录音按 00:00 对齐当前伴奏，请确认伴奏正确"
+                                : "同步回听：拖动进度条定位，音量设置同时用于导出");
                 }
 
                 public void failed(Exception e) {
@@ -2212,12 +2335,17 @@ public class MainActivity extends Activity {
 
   void exportOptions() {
     if (take == null || recording || starting || separating || exporting) return;
+    boolean voiceOnly;
+    try { voiceOnly = TakeInfo.read(take, originalAudio).source.isEmpty(); }
+    catch (Exception e) { error(e); return; }
     new AlertDialog.Builder(this)
         .setTitle("导出录音")
         .setItems(
-            new String[] {
-              "仅导出人声（调节音量后为 WAV，否则 M4A）", "人声＋伴奏混音（WAV，本次录制时段）", "分别导出人声和伴奏（ZIP，本次时段，应用音量）"
-            },
+            voiceOnly
+                ? new String[] { "仅导出人声（调节音量后为 WAV，否则 M4A）" }
+                : new String[] {
+                    "仅导出人声（调节音量后为 WAV，否则 M4A）", "人声＋伴奏混音（WAV，本次录制时段）", "分别导出人声和伴奏（ZIP，本次时段，应用音量）"
+                  },
             (d, mode) -> {
               try {
                 TakeInfo info =
@@ -2334,6 +2462,9 @@ public class MainActivity extends Activity {
     if (r == 9) {
       if (g.length > 0 && g[0] == PackageManager.PERMISSION_GRANTED) begin();
       else message("需要麦克风权限才能录音，可在系统设置授权。");
+    } else if (r == 19) {
+      if (g.length > 0 && g[0] == PackageManager.PERMISSION_GRANTED) toggleExternalRecording();
+      else message("外部伴奏录音需要麦克风权限。");
     }
   }
 
@@ -2366,6 +2497,7 @@ public class MainActivity extends Activity {
     if (exportThread != null) exportThread.interrupt();
     if (exportProgress != null) exportProgress.dismiss();
     if (separationTask != null) separationTask.cancel();
+    if (quickThread != null) quickThread.interrupt();
     handler.removeCallbacksAndMessages(null);
     requestVersion++;
     importVersion++;
