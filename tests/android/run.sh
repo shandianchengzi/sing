@@ -1,15 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
+trap 'echo "Android smoke test failed; recent external microphone diagnostics:" >&2; adb logcat -d -s SingExternalMic:V AndroidRuntime:E | tail -120 >&2 || true' ERR
 adb install -r build/sing-offline.apk
 adb install -r build/android-tests/tests.apk
 adb shell pm grant com.shandian.sing android.permission.POST_NOTIFICATIONS
 adb shell pm grant com.shandian.sing android.permission.RECORD_AUDIO
-adb shell am instrument -w -r com.shandian.sing.smoke/.LocalSeparationInstrumentation | tee build/android-tests/result.txt
+timeout 180s adb shell am instrument -w -r com.shandian.sing.smoke/.LocalSeparationInstrumentation | tee build/android-tests/result.txt
 grep -q 'INSTRUMENTATION_RESULT: passed=9' build/android-tests/result.txt
 grep -q 'INSTRUMENTATION_CODE: -1' build/android-tests/result.txt
 # Program-only APK must reuse the already installed model without network/assets.
 adb install -r build/sing.apk
-adb shell am instrument -w -r com.shandian.sing.smoke/.LocalSeparationInstrumentation | tee build/android-tests/update-result.txt
+timeout 180s adb shell am instrument -w -r com.shandian.sing.smoke/.LocalSeparationInstrumentation | tee build/android-tests/update-result.txt
 grep -q 'INSTRUMENTATION_RESULT: passed=9' build/android-tests/update-result.txt
 grep -q 'INSTRUMENTATION_CODE: -1' build/android-tests/update-result.txt
 adb shell am start -n com.shandian.sing/.MainActivity
