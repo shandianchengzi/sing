@@ -4,6 +4,8 @@
 
 PlaybackTest 使用可注入的音源和输出，验证自动开始、暂停、暂停时定位、继续、实时音量、结束重播、取消准备、解码失败；并核对导出 WAV 的全部样本与回听混音幅度一致、静音导出全部为零。AudioTest 另验证直接文件定位后的重采样。
 
+External recording acceptance: while another app plays accompaniment, start 外部伴奏录音 in Sing, switch back to music, lock the screen, verify that music continues and notification Stop saves M4A. Verify history selection, voice-only playback/export, mic permission denied and a too-short recording. On Android 14+ service must be started from a visible Activity. Quick center cancellation is PCM-tested, but stereo music quality and device-specific background behavior still need real listening tests.
+
 Platform MediaRecorder / MediaPlayer / MediaCodec / AudioTrack paths require an Android device. Before a stable release, check:
 
 1. Scrub an MP3/OGG/MP4 accompaniment to 00:15, record ~5 s. Confirm its JSON sidecar starts near 15000 ms and links the correct source.
