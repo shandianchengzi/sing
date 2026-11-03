@@ -13,6 +13,7 @@
 }
 
 # Android creates foreground services and TensorFlow JNI resolves these names.
+-keep public class com.shandian.sing.ExternalRecordingService { public <init>(); public *; }
 -keep public class com.shandian.sing.LocalSeparationService { public <init>(); public *; }
 -keep class org.tensorflow.lite.** { *; }
 -dontwarn org.tensorflow.lite.**
