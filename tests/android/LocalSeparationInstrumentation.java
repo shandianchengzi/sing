@@ -86,7 +86,7 @@ public final class LocalSeparationInstrumentation extends Instrumentation {
       Activity again=startActivitySync(new android.content.Intent()
           .setClassName(target,"com.shandian.sing.MainActivity")
           .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK
-              | android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP));
+              | android.content.Intent.FLAG_ACTIVITY_MULTIPLE_TASK));
       waitForIdleSync();
       if (target.checkSelfPermission("android.permission.RECORD_AUDIO")
           != android.content.pm.PackageManager.PERMISSION_GRANTED)
