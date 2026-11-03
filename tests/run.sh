@@ -2,6 +2,8 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 mkdir -p build/tests
+javac -encoding UTF-8 -d build/tests app/src/main/java/com/shandian/sing/CenterCancel.java tests/CenterCancelTest.java
+java -cp build/tests com.shandian.sing.CenterCancelTest
 javac -encoding UTF-8 -d build/tests app/src/main/java/com/shandian/sing/Lrc.java tests/LrcTest.java
 java -cp build/tests com.shandian.sing.LrcTest
 javac -encoding UTF-8 -d build/tests app/src/main/java/com/shandian/sing/LibraryNames.java tests/LibraryNamesTest.java
