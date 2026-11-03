@@ -35,7 +35,7 @@ final class TakeAudio implements AutoCloseable {
       cached.users++;
       return cached;
     }
-    TakeAudio next = prepare(context, file, info, true);
+    TakeAudio next = prepare(context, file, info, !info.source.isEmpty());
     if (cached != null) {
       cached.retained = false;
       if (cached.users == 0) cached.delete();
