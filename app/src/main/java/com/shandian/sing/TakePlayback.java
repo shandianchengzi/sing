@@ -168,7 +168,7 @@ final class TakePlayback implements AutoCloseable {
           if (b != null) b.close();
           baseFrame = frame = target;
           v = new PcmAudio.Reader(audio.voice, target, 48000);
-          b = new PcmAudio.Reader(audio.backing, target, 48000);
+          b = audio.backing == null ? null : new PcmAudio.Reader(audio.backing, target, 48000);
           Sink next = factory.open();
           synchronized (lock) {
             if (closed) {
