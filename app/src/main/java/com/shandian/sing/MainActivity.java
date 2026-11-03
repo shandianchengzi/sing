@@ -1206,7 +1206,8 @@ public class MainActivity extends Activity {
     externalRecord.setEnabled(external || !busy);
     record.setText(recording ? "停止并保存录音" : "从当前位置开始录音");
     record.setEnabled(
-        (ready || !loadedSource.isEmpty()) && replay == null && !busy);
+        (ready || !loadedSource.isEmpty()) && replay == null && !starting
+            && !previewSeeking && !separating && !exporting && !importingPair && !external);
     preview.setEnabled((replay == null ? ready : replayInfo != null && !replayInfo.source.isEmpty() && ready) && !busy);
     seek.setEnabled((ready || (replay != null && replay.ready)) && !busy);
     listen.setEnabled(!busy && take != null);
