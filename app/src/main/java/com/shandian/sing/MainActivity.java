@@ -50,6 +50,21 @@ public class MainActivity extends Activity {
   boolean exporting, starting, previewSeeking;
   Thread quickThread;
   long handledExternalResult, lastExternalPoll;
+  ExternalRecordingService externalService;
+  boolean externalBound, activityVisible;
+  final ServiceConnection externalConnection = new ServiceConnection() {
+    @Override public void onServiceConnected(ComponentName name, IBinder binder) {
+      externalService = ((ExternalRecordingService.LocalBinder) binder).service();
+      if (externalRecord != null) controls();
+    }
+    @Override public void onServiceDisconnected(ComponentName name) {
+      externalService = null;
+      if (externalRecord != null) {
+        controls();
+        message("后台录音服务连接已断开，请查看录音诊断");
+      }
+    }
+  };
   long recordingStart;
   String loadedSource = "";
   Runnable afterAudioReady;
@@ -233,6 +248,7 @@ public class MainActivity extends Activity {
               else begin();
             });
     externalRecord = button("外部伴奏录音（切换 App 继续）", () -> toggleExternalRecording());
+    button("后台录音状态与权限检查", () -> showExternalRecordingDiagnostics());
     button("快速提取伴奏（不使用 AI）", () -> pick(11, "*/*"));
     voiceGain = preferences.getFloat("voice_gain", 1);
     backingGain = preferences.getFloat("backing_gain", 1);
@@ -255,7 +271,8 @@ public class MainActivity extends Activity {
 
   void toggleExternalRecording() {
     if (ExternalRecordingService.isRecording()) {
-      startService(new Intent(this, ExternalRecordingService.class).setAction(ExternalRecordingService.STOP));
+      startService(new Intent(this, ExternalRecordingService.class)
+          .setAction(ExternalRecordingService.STOP));
       message("正在停止并保存外部录音…");
       return;
     }
@@ -263,18 +280,72 @@ public class MainActivity extends Activity {
       message("请先完成当前录音或处理");
       return;
     }
+    if (!activityVisible || externalService == null) {
+      message("麦克风服务尚未准备好，请保持轻唱在前台，再点击开始录音");
+      return;
+    }
     if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
       requestPermissions(new String[] {Manifest.permission.RECORD_AUDIO}, 19);
+      return;
+    }
+    if (Build.VERSION.SDK_INT >= 33 &&
+        checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        && !preferences.getBoolean("external_notification_asked", false)) {
+      preferences.edit().putBoolean("external_notification_asked", true).apply();
+      requestPermissions(new String[] {Manifest.permission.POST_NOTIFICATIONS}, 20);
       return;
     }
     stopVoice();
     if (player != null && ready && player.isPlaying()) player.pause();
     try {
+      // Queue a started service while the Activity is visible, then synchronously
+      // promote the already-bound service and start the microphone before returning
+      // control to the user. This avoids a background-creation race on Android 14+.
       startForegroundService(new Intent(this, ExternalRecordingService.class)
           .setAction(ExternalRecordingService.START));
-      message("正在启动外部录音；可以切回音乐 App，伴奏不会被主动暂停");
+      if (externalService.startNow()) {
+        message("麦克风已实际启动，可以切回音乐 App；通知栏可停止并保存");
+      } else {
+        message(ExternalRecordingService.diagnostic());
+        startService(new Intent(this, ExternalRecordingService.class)
+            .setAction(ExternalRecordingService.STOP));
+      }
       controls();
     } catch (RuntimeException e) { error(e); }
+  }
+
+  void showExternalRecordingDiagnostics() {
+    boolean permission = checkSelfPermission(Manifest.permission.RECORD_AUDIO)
+        == PackageManager.PERMISSION_GRANTED;
+    boolean notifications = Build.VERSION.SDK_INT < 33 ||
+        checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
+            == PackageManager.PERMISSION_GRANTED;
+    PowerManager power = (PowerManager) getSystemService(POWER_SERVICE);
+    boolean unrestricted = Build.VERSION.SDK_INT < 23
+        || power.isIgnoringBatteryOptimizations(getPackageName());
+    String last = preferences.getString("external_capture_diagnostic", "尚无录音状态");
+    String state = ExternalRecordingService.isRecording() ? "正在录制"
+        : preferences.getBoolean("external_recording_running", false)
+            ? "上次录音异常中断（应用进程可能被系统终止）" : "未录制";
+    String detail = "当前：" + state
+        + "\n麦克风权限：" + (permission ? "已授权" : "未授权")
+        + "\n通知权限：" + (notifications ? "已授权" : "未授权（可能不显示通知栏控制）")
+        + "\n电池优化豁免：" + (unrestricted ? "是" : "否，部分厂商会限制后台录音")
+        + "\n系统静音：" + (ExternalRecordingService.isSilenced() ? "是（录音流被系统静音）" : "未检测到")
+        + "\n上次采集电平：" + ExternalRecordingService.amplitude()
+        + "\n最近诊断：" + last
+        + "\n\n请在手机设置中允许轻唱后台活动和麦克风访问。"
+        + "如果已授权但仍出现静音，请检查其他 App 是否占用了麦克风。";
+    new AlertDialog.Builder(this).setTitle("后台录音诊断")
+        .setMessage(detail)
+        .setNegativeButton("关闭", null)
+        .setPositiveButton("打开轻唱应用设置", (d, w) -> {
+          try {
+            startActivity(new Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+                .setData(Uri.parse("package:" + getPackageName())));
+          } catch (RuntimeException e) { error(e); }
+        })
+        .show();
   }
 
   void refreshExternalRecording() {
@@ -1201,8 +1272,10 @@ public class MainActivity extends Activity {
   void controls() {
     boolean external = ExternalRecordingService.isRecording();
     boolean busy = recording || starting || previewSeeking || separating || exporting || importingPair || external;
-    externalRecord.setText(external ? "停止外部录音并保存" : "外部伴奏录音（切换 App 继续）");
-    externalRecord.setEnabled(external || !busy);
+    externalRecord.setText(external ? "停止外部录音并保存"
+        : externalService == null ? "正在准备外部录音服务…"
+        : "外部伴奏录音（切换 App 继续）");
+    externalRecord.setEnabled(external || (!busy && externalService != null && activityVisible));
     record.setText(recording ? "停止并保存录音" : "从当前位置开始录音");
     record.setEnabled(
         (ready || !loadedSource.isEmpty()) && replay == null && !starting
@@ -1796,6 +1869,14 @@ public class MainActivity extends Activity {
 
   @Override protected void onStart() {
     super.onStart();
+    activityVisible = true;
+    try {
+      externalBound = bindService(new Intent(this, ExternalRecordingService.class),
+          externalConnection, Context.BIND_AUTO_CREATE);
+    } catch (RuntimeException e) {
+      externalBound = false;
+      message("后台录音服务连接失败：" + e.getMessage());
+    }
     handler.post(tick);
     handler.post(localTick);
   }
@@ -2466,6 +2547,10 @@ public class MainActivity extends Activity {
     } else if (r == 19) {
       if (g.length > 0 && g[0] == PackageManager.PERMISSION_GRANTED) toggleExternalRecording();
       else message("外部伴奏录音需要麦克风权限。");
+    } else if (r == 20) {
+      if (g.length == 0 || g[0] != PackageManager.PERMISSION_GRANTED)
+        message("未授予通知权限，停止按钮可能不会出现在通知栏；可从轻唱首页停止");
+      if (activityVisible) toggleExternalRecording();
     }
   }
 
@@ -2477,6 +2562,12 @@ public class MainActivity extends Activity {
 
   @Override
   protected void onStop() {
+    activityVisible = false;
+    if (externalBound) {
+      unbindService(externalConnection);
+      externalBound = false;
+    }
+    externalService = null;
     handler.removeCallbacks(tick);
     handler.removeCallbacks(localTick);
     if(localProgress!=null) { localProgress.dismiss(); localProgress=null; }
